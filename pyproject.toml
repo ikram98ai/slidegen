@@ -1,0 +1,11 @@
+[project]
+name = "lumina"
+version = "0.1.0"
+description = "An educational tool that transforms PDFs into structured learning materials using Gemini AI."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard]>=0.124.0",
+    "google-genai>=1.54.0",
+    "sqlalchemy>=2.0.44",
+]
