@@ -9,8 +9,8 @@ wheels/
 # Virtual environments
 .venv
 .env
-
-
+.ruff_cache/
+*.sqlite3
 # Logs
 logs
 *.log

@@ -1,14 +1,14 @@
 import os
 import base64
 import struct
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
+from app.config import settings
 
-# Initialize client
-# Ensure GEMINI_API_KEY is set in your environment variables, 
-# or pass api_key="YOUR_KEY" directly to the constructor.
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 MODEL_NAME = 'gemini-2.5-flash'
 TTS_MODEL_NAME = 'gemini-2.5-flash-preview-tts'
@@ -59,12 +59,25 @@ def add_wav_header(pcm_data: bytes, sample_rate: int = 24000, num_channels: int 
 
 # --- MAIN SERVICES ---
 
-def analyze_book_structure(file_base64: str) -> List[Dict[str, str]]:
+class LessonData(BaseModel):
+    title: str
+    page_start: int
+    page_end: int
+    description: str
+
+class SlideData(BaseModel):
+    title: str
+    bullets: List[str]
+    explanation: str
+
+
+
+async def analyze_book_structure(file_base64: str) -> List[LessonData]:
     prompt = """
     You are an expert educational content analyzer.
     Analyze the first 50 pages of this PDF document (or the Table of Contents if available).
     Identify the main chapters or sections.
-    Return a list of chapters with their titles and a very brief 1-sentence description of what the chapter covers.
+    Return a list of chapters with their titles, page_start, page_end, and a very brief 1-sentence description of what the chapter covers.
     Do not hallucinate chapters if they are not clear.
     """
 
@@ -90,9 +103,11 @@ def analyze_book_structure(file_base64: str) -> List[Dict[str, str]]:
                         "type": "OBJECT",
                         "properties": {
                             "title": {"type": "STRING"},
+                            "page_start": {"type": "INTEGER"},
+                            "page_end": {"type": "INTEGER"},
                             "description": {"type": "STRING"}
                         },
-                        "required": ["title", "description"]
+                        "required": ["title", "page_start", "page_end", "description"]
                     }
                 }
             )
@@ -109,10 +124,10 @@ def analyze_book_structure(file_base64: str) -> List[Dict[str, str]]:
         print(f"Book analysis failed: {error}")
         raise Exception("Failed to analyze book structure.")
 
-def generate_chapter_slides(file_base64: str, chapter_title: str, chapter_desc: str) -> List[Dict[str, Any]]:
+async def generate_chapter_slides(chapter_title: str, chapter_desc: str) -> List[SlideData]:
     prompt = f"""
     You are an expert presentation designer.
-    Using the attached PDF, create detailed educational presentation slides specifically for the chapter titled: "{chapter_title}".
+    Create detailed educational presentation slides specifically for the chapter titled: "{chapter_title}".
     Context for this chapter: "{chapter_desc}".
     """
 
@@ -122,10 +137,6 @@ def generate_chapter_slides(file_base64: str, chapter_title: str, chapter_desc: 
             contents=[
                 types.Content(
                     parts=[
-                        types.Part.from_bytes(
-                            data=base64.b64decode(file_base64),
-                            mime_type="application/pdf"
-                        ),
                         types.Part.from_text(text=prompt)
                     ]
                 )
