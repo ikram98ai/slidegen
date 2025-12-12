@@ -8,8 +8,7 @@ from typing import Optional
 from app.db import get_db, User, Lesson, Slide
 from app.schemas import LessonUpdate, LessonResponse, SlideResponse
 from app.api.deps import get_current_active_user
-from app.services import ai, storage
-import uuid
+from app.services import bg_tasks
 
 router = APIRouter()
 
@@ -72,6 +71,7 @@ async def delete_lesson(
     # Delete lesson (cascade will delete slides)
     await db.delete(lesson)
     await db.commit()
+    
 
 @router.post("/{lesson_id}/slides/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate_slides(
@@ -97,62 +97,9 @@ async def generate_slides(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Start background task
-    background_tasks.add_task(
-        generate_slides_background,
-        lesson_id,
-        lesson.title
-    )
+    background_tasks.add_task(bg_tasks.generate_slides_background, lesson)
     
     return {"message": "Slide generation started"}
-
-async def generate_slides_background(lesson_id: int, lesson_title: str):
-    """Background task to generate slides"""
-    from app.db import AsyncSessionLocal
-    
-    async with AsyncSessionLocal() as db:
-        try:
-            # Get lesson text (simplified - in reality, extract from PDF pages)
-            # For now, we'll use a placeholder
-            lesson_text = f"Content for lesson: {lesson_title}"
-            
-            # Generate slides using AI
-            slides_data = await ai.generate_chapter_slides(lesson_title, lesson_text)
-            
-            if not slides_data:
-                return
-            
-            # Create slides
-            for i, slide_data in enumerate(slides_data):
-                # Generate voice for explanation
-                voice_filename = f"{uuid.uuid4()}_{slide_data.title[:20].replace(' ', '_')}.mp3"
-                wav_base64 = await ai.generate_slide_audio(
-                    slide_data["explanation"],
-                )
-                
-                is_upload = storage.upload_file(wav_base64, voice_filename)
-                if not is_upload:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to upload audio file to s3."
-                    )
-
-                # Create slide
-                slide = Slide(
-                    lesson_id=lesson_id,
-                    title=slide_data["title"],
-                    points=slide_data["points"],
-                    explanation=slide_data["explanation"],
-                    voice_url=voice_filename,
-                    order_index=i
-                )
-                db.add(slide)
-            
-            await db.commit()
-            
-        except Exception as e:
-            import traceback
-            print(f"Error generating slides for lesson {lesson_id}: {e}")
-            traceback.print_exc()
 
 @router.get("/{lesson_id}/slides", response_model=List[SlideResponse])
 async def get_lesson_slides(

@@ -47,10 +47,11 @@ def upload_file(file_obj, object_name):
         return False
     return True
 
-def download_file(object_name, file_obj):
+def download_file(object_name):
     """Download a file from an S3 bucket"""
     try:
-        file = s3_client.download_fileobj(settings.S3_BUCKET_NAME, object_name, file_obj)
+        with open(object_name.split("/")[-1], 'wb') as f:
+            file = s3_client.download_fileobj(settings.S3_BUCKET_NAME, object_name, f)
     except ClientError as e:
         logger.error(e)
         return None

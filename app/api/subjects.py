@@ -9,8 +9,7 @@ from pathlib import Path
 from app.db import get_db, User, Subject, SubjectType, Lesson
 from app.schemas import  SubjectUpdate, SubjectResponse, LessonResponse
 from app.api.deps import get_current_active_user
-from app.services import ai, storage
-
+from app.services import storage, bg_tasks
 
 router = APIRouter()
 
@@ -94,83 +93,9 @@ async def upload_subject(
     await db.refresh(subject)
     
     # Process file in background
-    background_tasks.add_task(process_subject_background, subject.id, file_s3path)
+    background_tasks.add_task(bg_tasks.process_subject_background, subject.id, file_s3path)
     
     return subject
-
-async def process_subject_background(subject_id: int, file_s3path:str ):
-    """Background task to process uploaded subject"""
-    from app.db import AsyncSessionLocal
-    
-    async with AsyncSessionLocal() as db:
-        try:
-            # Update status to processing
-            await db.execute(
-                update(Subject)
-                .where(Subject.id == subject_id)
-                .values(processing_status="processing")
-            )
-            await db.commit()
-            
-            # Extract lessons if it's a book
-            result = await db.execute(select(Subject).where(Subject.id == subject_id))
-            subject = result.scalar_one_or_none()
-
-            file_url  = storage.get_presigned_url(file_s3path)
-
-            # read the pdf file from s3 which can know the page count.
-            import base64
-            import requests
-            response = requests.get(file_url)
-            file_base64 = base64.b64encode(response.content).decode('utf-8')    
-
-
-            if subject and subject.type == SubjectType.BOOK:
-                lessons_data = await ai.analyze_book_structure(file_base64)
-                
-                # Save lessons
-                for i, lesson_data in enumerate(lessons_data):
-                    lesson = Lesson(
-                        subject_id=subject_id,
-                        title=lesson_data.title,
-                        page_start=lesson_data.page_start,
-                        page_end=lesson_data.page_end,
-                        order_index=i
-                    )
-                    db.add(lesson)
-                await db.commit()
-            else:
-                # For reports, create a single lesson
-                lesson = Lesson(
-                    subject_id=subject_id,
-                    title="Report Content",
-                    page_start=1,
-                    page_end=20,
-                    order_index=0
-                )
-                db.add(lesson)
-                await db.commit()
-            
-            # Update status to completed
-            await db.execute(
-                update(Subject)
-                .where(Subject.id == subject_id)
-                .values(processing_status="completed")
-            )
-            await db.commit()
-            
-        except Exception as e:
-            # Update status to failed
-            await db.execute(
-                update(Subject)
-                .where(Subject.id == subject_id)
-                .values(processing_status="failed")
-            )
-            await db.commit()
-            
-            import traceback
-            print(f"Error processing subject {subject_id}: {e}")
-            traceback.print_exc()
 
 @router.get("/{subject_id}/lessons", response_model=List[LessonResponse])
 async def get_subject_lessons(
