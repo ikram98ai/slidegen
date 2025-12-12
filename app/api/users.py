@@ -1,13 +1,14 @@
 # app/api/users.py
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
-from app.db import get_db
-from app.db import Subject, User
+import uuid
+from app.services import storage
+from app.db import get_db, Subject, User
 from app.schemas import UserResponse, UserUpdate, SubjectResponse
 from app.api.deps import get_current_active_user
+from app.config import settings
 
 router = APIRouter()
 
@@ -64,6 +65,7 @@ async def get_user_subjects(
 async def update_user(
     user_id: int,
     user_update: UserUpdate,
+    dp: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -77,19 +79,27 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Update user
+    if not dp.filename.lower().endswith((".jpg", ".jpeg", ".png")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPG, JPEG, PNG files are allowed for avatar",
+        )
+
+    if dp.size > 5 * 1024 * 1024:  # 5MB limit
+        raise HTTPException(
+            status_code=400, detail="Avatar file size too large (max 5MB)"
+        )
+
     update_data = user_update.dict(exclude_unset=True)
-    # store the dp in s3 and then save the url in db
-    # if "dp" in update_data and update_data["dp"]:
-    #     # Convert base64 to bytes
-    #     try:
-    #         if ',' in update_data["dp"]:
-    #             update_data["dp"] = base64.b64decode(update_data["dp"].split(',')[-1])
-    #         else:
-    #             update_data["dp"] = base64.b64decode(update_data["dp"])
-    #     except:
-    #         raise HTTPException(status_code=400, detail="Invalid base64 image")
-    
+
+    # Upload avatar to S3
+    avatar_content = await dp.read()
+    avatar_key = f"avatars/{current_user.user_id}_{uuid.uuid4()}.{dp.filename.split('.')[-1]}"
+    is_upload = storage.upload_file(avatar_content, avatar_key)
+    if is_upload:
+        avatar_url = f"https://{settings.S3_BUCKET_NAME}.s3.amazonaws.com/{avatar_key}"
+        update_data.dp = avatar_url
+
     # Update fields
     for field, value in update_data.items():
         setattr(user, field, value)

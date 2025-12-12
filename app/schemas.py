@@ -21,17 +21,8 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
-    dp: Optional[str] = None  # base64 encoded image
-    
-    @field_validator('dp')
-    def validate_dp(cls, v):
-        if v:
-            try:
-                # Validate base64
-                base64.b64decode(v.split(',')[-1])
-            except Exception as e:
-                raise ValueError('Invalid base64 image: ' + str(e))
-        return v
+    email: Optional[EmailStr] = None
+ 
 
 class UserInDB(UserBase):
     id: int

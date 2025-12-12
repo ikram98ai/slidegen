@@ -8,7 +8,7 @@ client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 MODEL_NAME = 'google_genai:gemini-2.0-flash'
-TTS_MODEL_NAME = 'gemini-2.5-flash-preview-tts'
+TTS_MODEL_NAME = 'google_genai:gemini-2.5-flash-preview-tts'
 
 llm = init_chat_model(model=MODEL_NAME, api_key=settings.GEMINI_API_KEY)
 tts = init_chat_model(model=TTS_MODEL_NAME, api_key=settings.GEMINI_API_KEY) 
