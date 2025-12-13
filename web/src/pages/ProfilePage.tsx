@@ -88,8 +88,8 @@ export const ProfilePage: React.FC = () => {
   return (
           <div className="pt-8">
             <NavBar />
-    <div className="max-w-4xl mx-auto p-6 animate-fade-in">
-      <div className="w-full max-w-md mx-auto">
+    <div className="max-w-7xl mx-auto animate-fade-in">
+      <div className="w-full max-w-md mx-auto p-4">
         <div className="bg-white rounded-4xl shadow-apple-xl p-8 border border-gray-100">
           <div className="flex flex-col items-center">
             <div className="relative">

@@ -3,11 +3,11 @@ import { create } from 'zustand';
 type ViewMode = 'vertical' | 'horizontal';
 
 interface ViewerState {
-  activeChapterId: string | null;
+  activeChapterId: number | null;
   viewMode: ViewMode;
   currentHorizontalIndex: number;
 
-  setActiveChapterId: (id: string | null) => void;
+  setActiveChapterId: (id: number | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setCurrentHorizontalIndex: (index: number) => void;
   reset: () => void;

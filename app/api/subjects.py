@@ -2,7 +2,9 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy import select
+
 import uuid
 from pathlib import Path
 
@@ -21,7 +23,8 @@ async def list_subjects(
 ):
     """List all subjects """
     # Only public subjects for non-authenticated users
-    query = select(Subject).where(Subject.is_public == True).offset(skip).limit(limit).order_by(Subject.created_at.desc())
+    query = select(Subject).options(selectinload(Subject.owner)).where(Subject.is_public == True)\
+                           .offset(skip).limit(limit).order_by(Subject.created_at.desc())
     
     result = await db.execute(query)
     subjects = result.scalars().all()
@@ -84,6 +87,21 @@ async def upload_subject(
     
     # Process file in background
     background_tasks.add_task(bg_tasks.process_subject_background, subject.id, file_s3path)
+    
+    return subject
+
+@router.get("/{subject_id}", response_model=SubjectResponse)
+async def get_subject_lessons(
+    subject_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all lessons for a subject"""
+    # Get subject
+    result = await db.execute(select(Subject).where(Subject.id == subject_id))
+    subject = result.scalar_one_or_none()
+    
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
     
     return subject
 

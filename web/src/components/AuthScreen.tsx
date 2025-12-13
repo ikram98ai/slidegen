@@ -30,7 +30,7 @@ export const AuthScreen: React.FC = () => {
   const isLoading = isLogin ? loginMutation.isPending : registerMutation.isPending;
 
   return (
-    <div className="min-h-screen bg-[#f5f5f7] flex flex-col justify-center items-center p-6">
+    <div className="min-h-screen bg-apple-gray flex flex-col justify-center items-center p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center p-3 bg-black rounded-2xl mb-6 shadow-xl">
@@ -44,7 +44,7 @@ export const AuthScreen: React.FC = () => {
           </p>
         </div>
 
-        <div className="bg-white rounded-[2rem] shadow-apple-xl p-8 md:p-10 border border-white/40">
+        <div className="bg-white rounded-4xl shadow-apple-xl p-8 md:p-10 border border-white/40">
           <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-6">
             {!isLogin && (
                  <div>

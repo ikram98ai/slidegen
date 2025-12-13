@@ -1,21 +1,21 @@
 export const DocType = {
-  BOOK: 'BOOK',
-  REPORT: 'REPORT'
+  BOOK: "book",
+  REPORT: "report",
 } as const;
-export type DocType = typeof DocType[keyof typeof DocType];
+export type DocType = (typeof DocType)[keyof typeof DocType];
 
 export const Tab = {
-  FILES: 'FILES',
-  UPLOAD: 'UPLOAD',
-  PROFILE: 'PROFILE'
+  FILES: "FILES",
+  UPLOAD: "UPLOAD",
+  PROFILE: "PROFILE",
 } as const;
-export type Tab = typeof Tab[keyof typeof Tab];
+export type Tab = (typeof Tab)[keyof typeof Tab];
 
 export interface User {
   id: string;
   name: string;
   email: string;
-  avatar: string;
+  dp: string;
 }
 
 export interface Slide {
@@ -23,55 +23,10 @@ export interface Slide {
   title: string;
   bullets: string[];
   explanation: string; // Detailed text explanation for the slide
-  audioBase64?: string; // Base64 encoded audio data (WAV format)
+  audio_url?: string; // Base64 encoded audio data (WAV format)
   isLoadingAudio?: boolean; // UI state for audio generation
 }
 
-export interface Chapter {
-  id: string; // usually the chapter number or title
-  title: string;
-  description: string;
-  slides?: Slide[]; // Optional because we might lazy load them
-  isLoadingSlides?: boolean;
-}
-
-export interface StoredSubject {
-  id: string;
-  title: string;
-  type: DocType;
-  uploadDate: Date;
-  fileBase64?: string | null; // Optional, might not exist for demo docs
-  file?: File; // Added for upload
-  chapters: Chapter[];
-  reportSlides: Slide[];
-  isUserOwner: boolean; // True if uploaded by current user
-  author: string;
-  userId?: string;
-}
-
-export interface ProjectState {
-  file: File | null;
-  fileBase64: string | null;
-  docType: DocType;
-  isAnalyzing: boolean;
-  chapters: Chapter[];
-  reportSlides: Slide[];
-  activeChapterId: string | null;
-  error: string | null;
-}
-
-export interface AuthResponse {
-  user: User;
-  token: string;
-}
-
-export interface UpdateSlideRequest {
-  subjectId: string;
-  chapterId?: string; // Optional, only for books
-  slideIndex: number;
-  slideId?: number; // Added for API integration
-  slide: Slide;
-}
 
 // API Types
 
@@ -97,14 +52,20 @@ export interface UserResponse {
   full_name: string;
   email: string;
   id: number;
-  dp:string
+  dp: string;
   is_active: boolean;
+}
+
+export interface SubjectCreate {
+  title: string;
+  file: File;
+  type:DocType;
 }
 
 export interface SubjectResponse {
   title: string;
   is_public: boolean;
-  type: 'book' | 'report';
+  type:DocType;
   id: number;
   user_id: number;
   file_path: string;
@@ -149,9 +110,9 @@ export interface SlideResponse {
 }
 
 export interface SlideUpdate {
+  id?: number
   title?: string | null;
   points?: string[] | null;
   explanation?: string | null;
   order_index?: number | null;
-  voice_url?: string | null;
 }

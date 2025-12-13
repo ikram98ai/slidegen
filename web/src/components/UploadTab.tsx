@@ -1,6 +1,6 @@
 import React from "react";
 import { BookOpen, FileText } from "lucide-react";
-import { DocType, Tab, type StoredSubject } from "../types";
+import { DocType, Tab, type SubjectCreate } from "../types";
 import { useSubjectStore } from "../store/subjectStore";
 import { FileUpload } from "./FileUpload";
 import { Button } from "./Button";
@@ -48,17 +48,10 @@ export const UploadTab: React.FC<UploadTabProps> = ({ onSetActiveTab }) => {
     setError(null);
 
     try {
-      const newSubject: StoredSubject = {
-        id: Date.now().toString(), // Temporary ID, will be replaced by backend
+      const newSubject: SubjectCreate = {
         title: file.name.replace(".pdf", ""),
         type: docType,
-        uploadDate: new Date(),
-        fileBase64: null,
         file: file,
-        chapters: [],
-        reportSlides: [],
-        isUserOwner: true,
-        author: "You",
       };
 
       // Save to "Database" via Mutation

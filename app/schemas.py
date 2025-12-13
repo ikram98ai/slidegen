@@ -73,7 +73,7 @@ class SubjectInDB(SubjectBase):
         from_attributes = True
 
 class SubjectResponse(SubjectInDB):
-    user: Optional[str] = None
+    pass
 
 class LessonBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)

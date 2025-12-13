@@ -1,12 +1,12 @@
 import React from "react";
 import { Layout } from "lucide-react";
-import type { StoredSubject } from "../types";
+import type { SubjectResponse } from "../types";
 import { SubjectCard } from "./SubjectCard";
 
 interface SubjectListProps {
-  subjects: StoredSubject[] | undefined;
+  subjects: SubjectResponse[] | undefined;
   isLoading: boolean;
-  onSubjectClick: (subject: StoredSubject) => void;
+  onSubjectClick: (subject: SubjectResponse) => void;
 }
 
 export const SubjectList: React.FC<SubjectListProps> = ({
@@ -28,9 +28,13 @@ export const SubjectList: React.FC<SubjectListProps> = ({
           </h3>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 animate-fade-in">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 animate-fade-in">
           {subjects.map((subject) => (
-            <SubjectCard key={subject.id} subject={subject} onClick={onSubjectClick} />
+            <SubjectCard
+              key={subject.id}
+              subject={subject}
+              onClick={onSubjectClick}
+            />
           ))}
         </div>
       )}

@@ -64,6 +64,11 @@ export const subjectsApi = {
     });
     return response.data;
   },
+
+  getSubject: async (subjectId:number): Promise<SubjectResponse> => {
+    const response = await api.get<SubjectResponse>(`/api/subjects/${subjectId}`);
+    return response.data;
+  },
   uploadSubject: async (formData: FormData): Promise<SubjectResponse> => {
     const response = await api.post<SubjectResponse>('/api/subjects/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

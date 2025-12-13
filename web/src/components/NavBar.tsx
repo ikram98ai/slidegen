@@ -37,8 +37,8 @@ export const NavBar: React.FC = () => {
   ];
 
   return (
-    <div className="flex justify-center w-full mb-8 relative">
-      <div className="bg-white/80 backdrop-blur-md p-1.5 rounded-full shadow-apple-sm border border-gray-200/50 flex space-x-1">
+    <div className="px-2 flex justify-center w-full mb-8 relative">
+      <div className="max-w-7xl bg-white/80 backdrop-blur-md p-1.5 rounded-full shadow-apple-sm border border-gray-200/50 flex space-x-1">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           const Icon = tab.icon;

@@ -1,17 +1,16 @@
-import React, { useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useSubjectDetails } from '../hooks/useAppQueries';
-import { useViewerStore } from '../store/viewerStore';
-import { BookReader } from '../components/BookReader';
-import { ReportReader } from '../components/ReportReader';
-import { DocType } from '../types';
-import { lessonsApi } from '../services/api';
+import React, { useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useViewerStore } from "../store/viewerStore";
+import { BookReader } from "../components/BookReader";
+import { ReportReader } from "../components/ReportReader";
+import { DocType } from "../types";
+import { useSubject } from "../hooks/useAppQueries";
 
 export const ReaderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+
   const navigate = useNavigate();
-  const { data: subjectDetails } = useSubjectDetails(id || null);
-  
+  const { data: subject } = useSubject(parseInt(id));
   const {
     activeChapterId,
     viewMode,
@@ -27,39 +26,15 @@ export const ReaderPage: React.FC = () => {
     return () => resetViewer();
   }, [id, resetViewer]);
 
-  // Set active chapter when subject loads
-  useEffect(() => {
-    if (
-      subjectDetails &&
-      subjectDetails.type === DocType.BOOK &&
-      subjectDetails.chapters.length > 0 &&
-      !activeChapterId
-    ) {
-      setActiveChapterId(subjectDetails.chapters[0].id);
-    }
-  }, [subjectDetails, activeChapterId, setActiveChapterId]);
-
   const closeSubject = () => {
-    navigate('/');
+    navigate("/");
   };
+  
+  if (!subject) return <div>No Subject found</div>;
 
-  const generateSlidesForActiveChapter = async () => {
-    if (!subjectDetails || !activeChapterId) return;
-    const lessonId = parseInt(activeChapterId);
-    if (isNaN(lessonId)) return;
-    try {
-      await lessonsApi.generateSlides(lessonId);
-      alert("Slides generation started. Please check back in a few moments.");
-    } catch {
-      alert("Failed to start slides generation.");
-    }
-  };
-
-  if (!subjectDetails) return <div>Loading...</div>;
-
-  return subjectDetails.type === DocType.BOOK ? (
+  return subject?.type === DocType.BOOK ? (
     <BookReader
-      subject={subjectDetails}
+      subject={subject}
       activeViewerChapterId={activeChapterId}
       setActiveViewerChapterId={setActiveChapterId}
       viewMode={viewMode}
@@ -67,11 +42,10 @@ export const ReaderPage: React.FC = () => {
       currentHorizontalIndex={currentHorizontalIndex}
       setCurrentHorizontalIndex={setCurrentHorizontalIndex}
       onClose={closeSubject}
-      onGenerateSlides={generateSlidesForActiveChapter}
     />
   ) : (
     <ReportReader
-      doc={subjectDetails}
+      subject={subject}
       viewMode={viewMode}
       setViewMode={setViewMode}
       currentHorizontalIndex={currentHorizontalIndex}
