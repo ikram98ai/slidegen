@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
-import fitz, uuid
+import fitz, uuid, os
 from app.db import Subject, SubjectType, Lesson, Slide
 from app.services import ai, storage
 import numpy as np 
@@ -10,6 +10,7 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
     from app.db import AsyncSessionLocal
     
     async with AsyncSessionLocal() as db:
+        file_path = None
         try:
             # Update status to processing
             await db.execute(
@@ -25,8 +26,11 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
 
 
             # read the pdf file from s3 which can know the table of contents and page count.
-            file = storage.download_file(file_s3path)
-            doc = fitz.open(file)
+            file_path = storage.download_file(file_s3path)
+            if not file_path:
+                raise Exception("Failed to download file from S3")
+                
+            doc = fitz.open(file_path)
 
             if subject and subject.type == SubjectType.BOOK:
 
@@ -52,7 +56,7 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
                     subject_id=subject_id,
                     title="Report Content",
                     page_start=1,
-                    page_end=doc.page_count(),
+                    page_end=doc.page_count,
                     order_index=0
                 )
                 db.add(lesson)
@@ -78,6 +82,9 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
             import traceback
             print(f"Error processing subject {subject_id}: {e}")
             traceback.print_exc()
+        finally:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
 
 
 
@@ -86,10 +93,14 @@ async def generate_slides_background(lesson: Lesson):
     from app.db import AsyncSessionLocal
     
     async with AsyncSessionLocal() as db:
+        file_path = None
         try:
 
-            file = storage.download_file(lesson.subject.file_path)
-            doc = fitz.open(file)
+            file_path = storage.download_file(lesson.subject.file_path)
+            if not file_path:
+                raise Exception("Failed to download file from S3")
+                
+            doc = fitz.open(file_path)
             pages = list(np.arange(lesson.page_start-1, lesson.page_end-1))
             doc.select(pages)
             chapter_text = "\n".join([page.get_text() for page in doc])
@@ -129,3 +140,6 @@ async def generate_slides_background(lesson: Lesson):
             import traceback
             print(f"Error generating slides for lesson {lesson.id}: {e}")
             traceback.print_exc()
+        finally:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)

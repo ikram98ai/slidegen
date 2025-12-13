@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { useLogin, useRegister } from '../hooks/useAppQueries';
-import { Sparkles, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, Eye, EyeOff } from 'lucide-react'; // Keep Eye and EyeOff for password toggle
 import { Button } from './Button';
 
 export const AuthScreen: React.FC = () => {
@@ -24,7 +23,7 @@ export const AuthScreen: React.FC = () => {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     // Avatar is handled by backend default generation if empty
-    registerMutation.mutate({ name, email, avatar: '', password });
+    registerMutation.mutate({ name, email, password });
   };
 
   const error = isLogin ? loginMutation.error : registerMutation.error;
@@ -35,7 +34,7 @@ export const AuthScreen: React.FC = () => {
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center p-3 bg-black rounded-2xl mb-6 shadow-xl">
-             <Sparkles className="text-white h-8 w-8" />
+             <BookOpen className="text-white h-8 w-8" /> {/* Changed Sparkles to BookOpen */}
           </div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
             {isLogin ? 'Welcome back.' : 'Create your account.'}
@@ -96,7 +95,7 @@ export const AuthScreen: React.FC = () => {
 
             {error && (
               <div className="p-4 rounded-xl bg-red-50 text-red-600 text-sm font-medium animate-fade-in">
-                {(error as any).response?.data?.message || "An error occurred."}
+                {(error as { message?: string })?.message || "An error occurred."}
               </div>
             )}
 

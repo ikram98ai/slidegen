@@ -2,15 +2,20 @@ import React from 'react';
 import { LayoutGrid, UploadCloud, UserCircle, LogOut } from 'lucide-react';
 import { Tab } from '../types';
 import { useAuthStore } from '../store/authStore';
+import { useUIStore } from '../store/uiStore';
 
-interface NavBarProps {
-  activeTab: Tab;
-  onTabChange: (tab: Tab) => void;
-}
-
-export const NavBar: React.FC<NavBarProps> = ({ activeTab, onTabChange }) => {
-  const logout = useAuthStore(state => state.logout);
+export const NavBar: React.FC = () => {
+  const { activeTab, setActiveTab, setShowAuthModal } = useUIStore();
+  const { isAuthenticated, logout } = useAuthStore();
   
+  const handleTabChange = (tab: Tab) => {
+    if ((tab === Tab.UPLOAD || tab === Tab.PROFILE) && !isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
+    setActiveTab(tab);
+  };
+
   const tabs = [
     { id: Tab.FILES, label: 'Explore', icon: LayoutGrid },
     { id: Tab.UPLOAD, label: 'Upload', icon: UploadCloud },
@@ -26,7 +31,7 @@ export const NavBar: React.FC<NavBarProps> = ({ activeTab, onTabChange }) => {
           return (
             <button
               key={tab.id}
-              onClick={() => onTabChange(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
               className={`
                 relative flex items-center space-x-2 px-6 py-2.5 rounded-full text-sm font-medium transition-all duration-300 ease-out
                 ${isActive 
@@ -45,13 +50,7 @@ export const NavBar: React.FC<NavBarProps> = ({ activeTab, onTabChange }) => {
         })}
       </div>
       
-      <button 
-        onClick={logout}
-        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-red-500 transition-colors"
-        title="Sign Out"
-      >
-        <LogOut size={20} />
-      </button>
+
     </div>
   );
 };

@@ -2,13 +2,13 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, union_all
+from sqlalchemy import select
 import uuid
 from pathlib import Path
 
 from app.db import get_db, User, Subject, SubjectType, Lesson
 from app.schemas import  SubjectUpdate, SubjectResponse, LessonResponse
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_user
 from app.services import storage, bg_tasks
 
 router = APIRouter()
@@ -18,21 +18,10 @@ async def list_subjects(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_active_user)
 ):
-    """List all subjects (public or user's own)"""
-    if current_user:
-        # Get user's subjects and public subjects
-        user_subjects_query = select(Subject).where(Subject.user_id == current_user.id)
-        public_subjects_query = select(Subject).where(Subject.is_public == True)
-        
-        # Combine queries
-        combined = union_all(user_subjects_query, public_subjects_query).alias()
-        
-        query = select(Subject).select_from(combined).offset(skip).limit(limit).order_by(Subject.created_at.desc())
-    else:
-        # Only public subjects for non-authenticated users
-        query = select(Subject).where(Subject.is_public == True).offset(skip).limit(limit).order_by(Subject.created_at.desc())
+    """List all subjects """
+    # Only public subjects for non-authenticated users
+    query = select(Subject).where(Subject.is_public == True).offset(skip).limit(limit).order_by(Subject.created_at.desc())
     
     result = await db.execute(query)
     subjects = result.scalars().all()
@@ -49,7 +38,7 @@ async def upload_subject(
     type: SubjectType = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Upload a new subject file"""
     # Validate file type
@@ -72,7 +61,8 @@ async def upload_subject(
     
     # Save file
     file_s3path = f"subjects/{current_user.id}/{uuid.uuid4()}_{file.filename}"
-    is_upload = await storage.upload_file(file, file.filename)
+    file_bytes = await file.read()
+    is_upload = storage.upload_file(file_bytes, file_s3path)
     if not is_upload:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -101,7 +91,7 @@ async def upload_subject(
 async def get_subject_lessons(
     subject_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_active_user)
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """Get all lessons for a subject"""
     # Get subject
@@ -130,7 +120,7 @@ async def update_subject(
     subject_id: int,
     subject_update: SubjectUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Update subject - only owner"""
     # Get subject
@@ -159,7 +149,7 @@ async def update_subject(
 async def delete_subject(
     subject_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Delete subject - only owner"""
     # Get subject

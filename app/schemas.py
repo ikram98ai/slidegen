@@ -4,7 +4,6 @@ from typing import Optional, List
 
 from datetime import datetime
 from enum import Enum
-import base64
 
 class UserBase(BaseModel):
     full_name: str
@@ -22,6 +21,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
+    dp: Optional[str] = None
  
 
 class UserInDB(UserBase):
@@ -32,7 +32,8 @@ class UserInDB(UserBase):
         from_attributes = True
 
 class UserResponse(UserInDB):
-    pass
+    dp: Optional[str] = None
+ 
 
 class Token(BaseModel):
     access_token: str
@@ -72,8 +73,7 @@ class SubjectInDB(SubjectBase):
         from_attributes = True
 
 class SubjectResponse(SubjectInDB):
-    pass
-
+    user: Optional[str] = None
 
 class LessonBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)

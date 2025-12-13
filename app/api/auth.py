@@ -11,6 +11,7 @@ from app.api.deps import (
     create_access_token, 
     create_refresh_token,
     verify_token,
+    get_current_user
     )
 from app.db import User
 from app.schemas import UserCreate, Token, UserResponse
@@ -102,3 +103,10 @@ async def refresh_token(refresh_token: str, db: AsyncSession = Depends(get_db)):
         "refresh_token": new_refresh_token,
         "token_type": "bearer"
     }
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_user(
+    current_user: User = Depends(get_current_user)
+):
+    return current_user

@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from typing import Optional
 from app.db import get_db, User, Lesson, Slide
 from app.schemas import LessonUpdate, LessonResponse, SlideResponse
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_user
 from app.services import bg_tasks
 
 router = APIRouter()
@@ -17,7 +17,7 @@ async def update_lesson(
     lesson_id: int,
     lesson_update: LessonUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Update lesson - only owner"""
     # Get lesson with subject
@@ -50,7 +50,7 @@ async def update_lesson(
 async def delete_lesson(
     lesson_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Delete lesson - only owner"""
     # Get lesson with subject
@@ -78,7 +78,7 @@ async def generate_slides(
     lesson_id: int,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Generate slides for a lesson (AI)"""
     # Get lesson with subject
@@ -105,7 +105,7 @@ async def generate_slides(
 async def get_lesson_slides(
     lesson_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_active_user)
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """Get all slides for a lesson"""
     # Get lesson with subject

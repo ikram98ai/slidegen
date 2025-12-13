@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_db, User, Slide, Lesson
 from app.schemas import SlideUpdate, SlideResponse
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_user
 
 router = APIRouter()
 
@@ -15,7 +15,7 @@ async def update_slide(
     slide_id: int,
     slide_update: SlideUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Update slide - only owner"""
     # Get slide with lesson and subject
@@ -50,7 +50,7 @@ async def update_slide(
 async def delete_slide(
     slide_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user)
 ):
     """Delete slide - only owner"""
     # Get slide with lesson and subject

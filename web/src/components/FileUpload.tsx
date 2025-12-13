@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void;
@@ -9,6 +9,15 @@ interface FileUploadProps {
 export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, selectedFile }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const validateAndSelect = React.useCallback((file: File) => {
+    setError(null); // Clear previous errors
+    if (file.type !== 'application/pdf') {
+      setError("Please upload a PDF file.");
+      return;
+    }
+    onFileSelect(file);
+  }, [onFileSelect]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -23,25 +32,15 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, selectedFi
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    setError(null);
-
+    
     const file = e.dataTransfer.files[0];
     validateAndSelect(file);
-  }, []);
+  }, [validateAndSelect]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
     if (e.target.files && e.target.files[0]) {
       validateAndSelect(e.target.files[0]);
     }
-  };
-
-  const validateAndSelect = (file: File) => {
-    if (file.type !== 'application/pdf') {
-      setError("Please upload a PDF file.");
-      return;
-    }
-    onFileSelect(file);
   };
 
   return (

@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import type { Slide } from '../types';
-import { Volume2, Loader2, Play, Pause, FileText, X, Settings, Gauge, Volume1, Edit3, Save, RotateCcw, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Play, Pause, FileText, X, Settings, Gauge, Volume1, Edit3, Save, Plus, Trash2 } from 'lucide-react';
 import { useUpdateSlide } from '../hooks/useAppQueries';
 
 interface SlideCardProps {
@@ -9,7 +9,6 @@ interface SlideCardProps {
   total: number;
   documentId: string; // Needed for update
   chapterId?: string; // Needed for update
-  onGenerateAudio: () => void;
 }
 
 export const SlideCard: React.FC<SlideCardProps> = ({ 
@@ -18,7 +17,6 @@ export const SlideCard: React.FC<SlideCardProps> = ({
   total, 
   documentId,
   chapterId,
-  onGenerateAudio
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
@@ -39,13 +37,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
 
   const updateSlideMutation = useUpdateSlide();
 
-  // Sync edit state when slide prop changes (e.g. navigation)
-  useEffect(() => {
-    setEditTitle(slide.title);
-    setEditBullets([...slide.bullets]);
-    setEditExplanation(slide.explanation);
-    setIsEditing(false); // Reset edit mode on nav
-  }, [slide]);
+
 
   // --- AUDIO SETUP ---
   useEffect(() => {
@@ -57,6 +49,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
         };
       } else {
          audioRef.current.src = `data:audio/wav;base64,${slide.audioBase64}`;
+         // eslint-disable-next-line react-hooks/set-state-in-effect
          setIsPlaying(false);
       }
       audioRef.current.volume = volume;
@@ -95,7 +88,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
   // --- HANDLERS ---
   const handleTogglePlayback = () => {
     if (!slide.audioBase64) {
-      onGenerateAudio();
+      // Audio generation is handled by backend now
       return;
     }
     const audio = audioRef.current;
@@ -112,10 +105,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
     }
   };
 
-  const handleAudioGenerateClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onGenerateAudio();
-  };
+
 
   const handleSave = () => {
     const updatedSlide: Slide = {
@@ -254,16 +244,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
                 </div>
               )}
 
-              {!slide.audioBase64 && (
-                   <button
-                      onClick={handleAudioGenerateClick}
-                      disabled={slide.isLoadingAudio}
-                      className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-all disabled:opacity-50"
-                      title="Generate Audio"
-                  >
-                      {slide.isLoadingAudio ? <Loader2 size={18} className="animate-spin"/> : <Volume2 size={18} />}
-                  </button>
-              )}
+
 
               {slide.audioBase64 && (
                   <button onClick={handleTogglePlayback} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 shadow-md ml-1 ${isPlaying ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-black text-white hover:bg-gray-800'}`}>

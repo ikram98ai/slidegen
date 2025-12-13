@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '../lib/axios';
-import type { StoredDocument, User, UpdateSlideRequest, Slide } from '../types';
+import { authApi, subjectsApi, lessonsApi, slidesApi, usersApi } from '../services/api';
+import type { StoredDocument, UpdateSlideRequest, SubjectResponse } from '../types';
+import { DocType } from '../types';
 import { useAuthStore } from '../store/authStore';
 
 // --- Auth Hooks ---
@@ -9,11 +10,13 @@ export const useLogin = () => {
   const login = useAuthStore(state => state.login);
   return useMutation({
     mutationFn: async (credentials: { email: string; password?: string }) => {
-      const { data } = await api.post('/auth/login', credentials);
-      return data;
+      const formData = new URLSearchParams();
+      formData.append('username', credentials.email);
+      formData.append('password', credentials.password || '');
+      return await authApi.login(formData);
     },
-    onSuccess: (data) => {
-      login(data.user, data.token);
+    onSuccess: (_, variables) => {
+      return login(variables.email, variables.password || '');
     },
   });
 };
@@ -21,25 +24,96 @@ export const useLogin = () => {
 export const useRegister = () => {
   const login = useAuthStore(state => state.login);
   return useMutation({
-    mutationFn: async (details: { name: string; email: string; avatar: string; password?: string }) => {
-      const { data } = await api.post('/auth/register', details);
-      return data;
+    mutationFn: async (details: { name: string; email: string; password?: string }) => {
+      return await authApi.register({ full_name: details.name, email: details.email, password: details.password || '' });
     },
-    onSuccess: (data) => {
-      login(data.user, data.token);
+    onSuccess: async (_, variables) => {
+      // Auto login
+      await login(variables.email, variables.password || '');
     },
   });
 };
 
 // --- Document Hooks ---
 
+const mapSubjectToStoredDocument = (subject: SubjectResponse): StoredDocument => {
+  return {
+    id: subject.id.toString(),
+    title: subject.title,
+    type: subject.type === 'book' ? DocType.BOOK : DocType.REPORT,
+    uploadDate: new Date(subject.created_at),
+    fileBase64: null, // Not returned by list
+    chapters: [], // Fetched separately
+    reportSlides: [], // Fetched separately
+    isUserOwner: true, // Assuming list returns own subjects or public ones. API says "public or user's own".
+    author: 'Unknown', // API doesn't return author name yet
+    userId: subject.user_id.toString(),
+  };
+};
+
 export const useDocuments = () => {
   return useQuery<StoredDocument[]>({
     queryKey: ['documents'],
     queryFn: async () => {
-      const { data } = await api.get('/documents');
-      return data;
+      const subjects = await subjectsApi.listSubjects();
+      return subjects.map(mapSubjectToStoredDocument);
     },
+  });
+};
+
+export const useUserSubjects = (userId: number | undefined) => {
+  return useQuery<StoredDocument[]>({
+    queryKey: ['userSubjects', userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      const subjects = await usersApi.getUserSubjects(userId);
+      return subjects.map(mapSubjectToStoredDocument);
+    },
+    enabled: !!userId,
+  });
+};
+
+export const useDocumentDetails = (documentId: string | null) => {
+  return useQuery<StoredDocument | null>({
+    queryKey: ['document', documentId],
+    queryFn: async () => {
+      if (!documentId) return null;
+      const id = parseInt(documentId);
+      
+      const lessons = await subjectsApi.getSubjectLessons(id);
+      
+      // Now fetch slides for each lesson.
+      const lessonsWithSlides = await Promise.all(lessons.map(async (lesson) => {
+          const slides = await lessonsApi.getLessonSlides(lesson.id);
+          return {
+              ...lesson,
+              slides
+          };
+      }));
+      
+      return {
+          id: documentId,
+          title: "Loading...", // Placeholder if not found
+          type: DocType.BOOK, // Default
+          uploadDate: new Date(),
+          chapters: lessonsWithSlides.map(l => ({
+              id: l.id.toString(),
+              title: l.title,
+              description: "", // Lesson doesn't have description in API?
+              slides: l.slides.map(s => ({
+                  id: s.id,
+                  title: s.title,
+                  bullets: s.points,
+                  explanation: s.explanation,
+                  audioBase64: s.voice_url || undefined,
+              }))
+          })),
+          reportSlides: [], // TODO: Handle report type
+          isUserOwner: true,
+          author: "",
+      } as StoredDocument; 
+    },
+    enabled: !!documentId,
   });
 };
 
@@ -47,8 +121,17 @@ export const useAddDocument = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (doc: StoredDocument) => {
-      const { data } = await api.post('/documents', doc);
-      return data;
+      // We need to upload the file.
+      // The `doc` object has `file` (File object).
+      if (!doc.file) throw new Error("No file to upload");
+      
+      const formData = new FormData();
+      formData.append('title', doc.title);
+      formData.append('type', doc.type === DocType.BOOK ? 'book' : 'report');
+      formData.append('is_public', 'false');
+      formData.append('file', doc.file);
+      
+      return await subjectsApi.uploadSubject(formData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
@@ -60,13 +143,18 @@ export const useUpdateSlide = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: UpdateSlideRequest) => {
-      await api.put('/documents/slide', payload);
-      return payload;
+      const slideId = payload.slideId; 
+      if (!slideId) throw new Error("Slide ID is missing");
+      
+      return await slidesApi.updateSlide(slideId, {
+          title: payload.slide.title,
+          points: payload.slide.bullets,
+          explanation: payload.slide.explanation,
+          voice_url: payload.slide.audioBase64
+      });
     },
-    onSuccess: (data) => {
-      // Optimistic update or invalidation could happen here.
-      // For simplicity, we invalidate 'documents'.
-      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['document', variables.documentId] });
     },
   });
 };

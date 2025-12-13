@@ -2,6 +2,7 @@ import boto3
 from botocore.exceptions import ClientError
 from app.config import settings
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -12,14 +13,16 @@ s3_client = boto3.client(
     region_name=settings.AWS_REGION,
 )
 def ensure_bucket_exists() -> bool:
-    """Ensure the S3 bucket exists; create it if missing."""
+    """Ensure the S3 bucket exists; create it if missing and make it public."""
     bucket = settings.S3_BUCKET_NAME
     try:
         s3_client.head_bucket(Bucket=bucket)
+        logger.info("Bucket %s already exists.", bucket)
         return True
     except ClientError:
-        logger.info("Bucket %s not found, attempting to create it", bucket)
+        logger.info("Bucket %s not found, attempting to create it.", bucket)
         try:
+            # Create the bucket
             if settings.AWS_REGION in (None, "", "us-east-1"):
                 s3_client.create_bucket(Bucket=bucket)
             else:
@@ -27,25 +30,71 @@ def ensure_bucket_exists() -> bool:
                     Bucket=bucket,
                     CreateBucketConfiguration={"LocationConstraint": settings.AWS_REGION},
                 )
-            logger.info("Created bucket %s", bucket)
+            logger.info("Successfully created bucket %s.", bucket)
+
+            # Disable block public access
+            s3_client.put_public_access_block(
+                Bucket=bucket,
+                PublicAccessBlockConfiguration={
+                    'BlockPublicAcls': False,
+                    'IgnorePublicAcls': False,
+                    'BlockPublicPolicy': False,
+                    'RestrictPublicBuckets': False
+                }
+            )
+            logger.info("Disabled public access block for bucket %s.", bucket)
+
+            # Define the bucket policy
+            bucket_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "PublicReadGetObject",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{bucket}/*"
+                    }
+                ]
+            }
+
+            # Apply the bucket policy
+            s3_client.put_bucket_policy(
+                Bucket=bucket,
+                Policy=json.dumps(bucket_policy)
+            )
+            logger.info("Set public read policy for bucket %s.", bucket)
+
             return True
         except ClientError as ce:
-            logger.error("Failed to create bucket %s: %s", bucket, ce)
+            logger.error("Failed to create or configure bucket %s: %s", bucket, ce)
             return False
 
-
-def upload_file(file_obj, object_name):
+def upload_file(file, object_name):
     """Upload a file to an S3 bucket"""
     if not ensure_bucket_exists():
         logger.error("Bucket does not exist and could not be created.")
         return False
 
     try:
-        s3_client.upload_fileobj(file_obj, settings.S3_BUCKET_NAME, object_name)
+        # bytes/bytearray -> wrap in BytesIO
+        if isinstance(file, (bytes, bytearray)):
+            import io
+            file = io.BytesIO(file)
+            s3_client.upload_fileobj(file, settings.S3_BUCKET_NAME, object_name)
+            return True
+
+        # path string -> use upload_file (more efficient for large files)
+        if isinstance(file, str):
+            s3_client.upload_file(file, settings.S3_BUCKET_NAME, object_name)
+            return True
+            
+        # file-like object
+        s3_client.upload_fileobj(file, settings.S3_BUCKET_NAME, object_name)
+        return True
     except ClientError as e:
         logger.error(e)
         return False
-    return True
 
 def download_file(object_name):
     """Download a file from an S3 bucket"""
@@ -70,6 +119,11 @@ def get_presigned_url(object_name, expiration=3600):
         logger.error(e)
         return None
     return response
+
+def get_public_url(object_name):
+    """Generate a public URL for an S3 object."""
+    return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{object_name}"
+
 
 
 def upload_text(content, object_name):
