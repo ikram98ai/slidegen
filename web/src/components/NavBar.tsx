@@ -1,19 +1,33 @@
 import React from 'react';
-import { LayoutGrid, UploadCloud, UserCircle, LogOut } from 'lucide-react';
+import { LayoutGrid, UploadCloud, UserCircle } from 'lucide-react';
 import { Tab } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useUIStore } from '../store/uiStore';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 export const NavBar: React.FC = () => {
-  const { activeTab, setActiveTab, setShowAuthModal } = useUIStore();
-  const { isAuthenticated, logout } = useAuthStore();
-  
+  const { setShowAuthModal } = useUIStore();
+  const { isAuthenticated } = useAuthStore();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const getActiveTab = (path: string) => {
+    if (path === '/' || path.startsWith('/subject')) return Tab.FILES;
+    if (path === '/upload') return Tab.UPLOAD;
+    if (path === '/profile') return Tab.PROFILE;
+    return Tab.FILES;
+  };
+
+  const activeTab = getActiveTab(location.pathname);
+
   const handleTabChange = (tab: Tab) => {
     if ((tab === Tab.UPLOAD || tab === Tab.PROFILE) && !isAuthenticated) {
       setShowAuthModal(true);
       return;
     }
-    setActiveTab(tab);
+    if (tab === Tab.FILES) navigate('/');
+    if (tab === Tab.UPLOAD) navigate('/upload');
+    if (tab === Tab.PROFILE) navigate('/profile');
   };
 
   const tabs = [

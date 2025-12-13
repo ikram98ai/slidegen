@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { DocType } from '../types';
 
-interface DocumentState {
+interface SubjectState {
   file: File | null;
   fileBase64: string | null;
   docType: DocType;
@@ -16,7 +16,7 @@ interface DocumentState {
   reset: () => void;
 }
 
-export const useDocumentStore = create<DocumentState>((set) => ({
+export const useSubjectStore = create<SubjectState>((set) => ({
   file: null,
   fileBase64: null,
   docType: DocType.BOOK,

@@ -7,7 +7,7 @@ interface SlideCardProps {
   slide: Slide;
   index: number;
   total: number;
-  documentId: string; // Needed for update
+  subjectId: string; // Needed for update
   chapterId?: string; // Needed for update
 }
 
@@ -15,7 +15,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
   slide, 
   index, 
   total, 
-  documentId,
+  subjectId,
   chapterId,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -117,7 +117,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
     };
     
     updateSlideMutation.mutate({
-        documentId,
+        subjectId,
         chapterId,
         slideIndex: index,
         slide: updatedSlide

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi, subjectsApi, lessonsApi, slidesApi, usersApi } from '../services/api';
-import type { StoredDocument, UpdateSlideRequest, SubjectResponse } from '../types';
+import type { StoredSubject, UpdateSlideRequest, SubjectResponse } from '../types';
 import { DocType } from '../types';
 import { useAuthStore } from '../store/authStore';
 
@@ -34,9 +34,9 @@ export const useRegister = () => {
   });
 };
 
-// --- Document Hooks ---
+// --- Subject Hooks ---
 
-const mapSubjectToStoredDocument = (subject: SubjectResponse): StoredDocument => {
+const mapSubjectToStoredSubject = (subject: SubjectResponse): StoredSubject => {
   return {
     id: subject.id.toString(),
     title: subject.title,
@@ -51,34 +51,34 @@ const mapSubjectToStoredDocument = (subject: SubjectResponse): StoredDocument =>
   };
 };
 
-export const useDocuments = () => {
-  return useQuery<StoredDocument[]>({
-    queryKey: ['documents'],
+export const useSubjects = () => {
+  return useQuery<StoredSubject[]>({
+    queryKey: ['subjects'],
     queryFn: async () => {
       const subjects = await subjectsApi.listSubjects();
-      return subjects.map(mapSubjectToStoredDocument);
+      return subjects.map(mapSubjectToStoredSubject);
     },
   });
 };
 
 export const useUserSubjects = (userId: number | undefined) => {
-  return useQuery<StoredDocument[]>({
+  return useQuery<StoredSubject[]>({
     queryKey: ['userSubjects', userId],
     queryFn: async () => {
       if (!userId) return [];
       const subjects = await usersApi.getUserSubjects(userId);
-      return subjects.map(mapSubjectToStoredDocument);
+      return subjects.map(mapSubjectToStoredSubject);
     },
     enabled: !!userId,
   });
 };
 
-export const useDocumentDetails = (documentId: string | null) => {
-  return useQuery<StoredDocument | null>({
-    queryKey: ['document', documentId],
+export const useSubjectDetails = (subjectId: string | null) => {
+  return useQuery<StoredSubject | null>({
+    queryKey: ['subject', subjectId],
     queryFn: async () => {
-      if (!documentId) return null;
-      const id = parseInt(documentId);
+      if (!subjectId) return null;
+      const id = parseInt(subjectId);
       
       const lessons = await subjectsApi.getSubjectLessons(id);
       
@@ -92,7 +92,7 @@ export const useDocumentDetails = (documentId: string | null) => {
       }));
       
       return {
-          id: documentId,
+          id: subjectId,
           title: "Loading...", // Placeholder if not found
           type: DocType.BOOK, // Default
           uploadDate: new Date(),
@@ -111,16 +111,16 @@ export const useDocumentDetails = (documentId: string | null) => {
           reportSlides: [], // TODO: Handle report type
           isUserOwner: true,
           author: "",
-      } as StoredDocument; 
+      } as StoredSubject; 
     },
-    enabled: !!documentId,
+    enabled: !!subjectId,
   });
 };
 
-export const useAddDocument = () => {
+export const useAddSubject = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (doc: StoredDocument) => {
+    mutationFn: async (doc: StoredSubject) => {
       // We need to upload the file.
       // The `doc` object has `file` (File object).
       if (!doc.file) throw new Error("No file to upload");
@@ -134,7 +134,7 @@ export const useAddDocument = () => {
       return await subjectsApi.uploadSubject(formData);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['documents'] });
+      queryClient.invalidateQueries({ queryKey: ['subjects'] });
     },
   });
 };
@@ -154,7 +154,7 @@ export const useUpdateSlide = () => {
       });
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['document', variables.documentId] });
+      queryClient.invalidateQueries({ queryKey: ['subject', variables.subjectId] });
     },
   });
 };

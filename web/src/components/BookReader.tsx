@@ -1,11 +1,11 @@
 import React from 'react';
 import { ChevronLeft, Layout, LayoutTemplate, Rows } from 'lucide-react';
-import type { StoredDocument } from '../types';
+import type { StoredSubject } from '../types';
 import { Button } from './Button';
 import { SlidesViewer } from './SlidesViewer';
 
 interface BookReaderProps {
-  doc: StoredDocument;
+  subject: StoredSubject;
   activeViewerChapterId: string | null;
   setActiveViewerChapterId: (id: string) => void;
   viewMode: 'vertical' | 'horizontal';
@@ -17,7 +17,7 @@ interface BookReaderProps {
 }
 
 export const BookReader: React.FC<BookReaderProps> = ({
-  doc,
+  subject,
   activeViewerChapterId,
   setActiveViewerChapterId,
   viewMode,
@@ -27,7 +27,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
   onClose,
   onGenerateSlides
 }) => {
-  const activeChapter = doc.chapters.find(c => c.id === activeViewerChapterId);
+  const activeChapter = subject.chapters.find(c => c.id === activeViewerChapterId);
 
   const renderViewToggle = () => (
     <div className="flex items-center bg-gray-100 p-1 rounded-lg">
@@ -58,11 +58,11 @@ export const BookReader: React.FC<BookReaderProps> = ({
            </button>
            <div>
               <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Table of Contents</h2>
-              <p className="text-xs text-gray-500 truncate max-w-[180px]">{doc.title}</p>
+              <p className="text-xs text-gray-500 truncate max-w-[180px]">{subject.title}</p>
            </div>
          </div>
          <div className="overflow-y-auto flex-1 p-4 space-y-2">
-           {doc.chapters.map((chapter, index) => (
+           {subject.chapters.map((chapter, index) => (
              <button
                key={chapter.id}
                onClick={() => {
@@ -120,7 +120,7 @@ export const BookReader: React.FC<BookReaderProps> = ({
                     viewMode={viewMode}
                     currentHorizontalIndex={currentHorizontalIndex}
                     setCurrentHorizontalIndex={setCurrentHorizontalIndex}
-                    documentId={doc.id}
+                    subjectId={subject.id}
                     chapterId={activeChapter.id}
                   />
                ) : (

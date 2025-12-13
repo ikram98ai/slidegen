@@ -8,7 +8,7 @@ interface SlidesViewerProps {
   viewMode: 'vertical' | 'horizontal';
   currentHorizontalIndex: number;
   setCurrentHorizontalIndex: (index: number) => void;
-  documentId: string;
+  subjectId: string;
   chapterId?: string;
 }
 
@@ -17,7 +17,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   viewMode,
   currentHorizontalIndex,
   setCurrentHorizontalIndex,
-  documentId,
+  subjectId: subjectId,
   chapterId
 }) => {
   if (viewMode === 'vertical') {
@@ -29,7 +29,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
             slide={slide} 
             index={idx} 
             total={slides.length} 
-            documentId={documentId}
+            subjectId={subjectId}
             chapterId={chapterId}
           />
         ))}
@@ -46,7 +46,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
               slide={currentSlide} 
               index={currentHorizontalIndex} 
               total={slides.length} 
-              documentId={documentId}
+              subjectId={subjectId}
               chapterId={chapterId}
             />
             

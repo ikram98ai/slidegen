@@ -35,7 +35,7 @@ export interface Chapter {
   isLoadingSlides?: boolean;
 }
 
-export interface StoredDocument {
+export interface StoredSubject {
   id: string;
   title: string;
   type: DocType;
@@ -66,7 +66,7 @@ export interface AuthResponse {
 }
 
 export interface UpdateSlideRequest {
-  documentId: string;
+  subjectId: string;
   chapterId?: string; // Optional, only for books
   slideIndex: number;
   slideId?: number; // Added for API integration

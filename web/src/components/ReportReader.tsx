@@ -1,10 +1,10 @@
 import React from 'react';
 import { ChevronLeft, LayoutTemplate, Rows } from 'lucide-react';
-import type { StoredDocument } from '../types';
+import type { StoredSubject } from '../types';
 import { SlidesViewer } from './SlidesViewer';
 
 interface ReportReaderProps {
-  doc: StoredDocument;
+  doc: StoredSubject;
   viewMode: 'vertical' | 'horizontal';
   setViewMode: (mode: 'vertical' | 'horizontal') => void;
   currentHorizontalIndex: number;
@@ -64,7 +64,7 @@ export const ReportReader: React.FC<ReportReaderProps> = ({
                 viewMode={viewMode}
                 currentHorizontalIndex={currentHorizontalIndex}
                 setCurrentHorizontalIndex={setCurrentHorizontalIndex}
-                documentId={doc.id}
+                subjectId={doc.id}
             />
         </div>
       </div>
