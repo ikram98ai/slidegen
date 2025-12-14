@@ -41,6 +41,7 @@ export const ProfilePage: React.FC = () => {
       setPreview(URL.createObjectURL(e.target.files[0]));
     }
   };
+  
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();

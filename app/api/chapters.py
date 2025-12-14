@@ -4,12 +4,46 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from app.db import get_db, User, Chapter, Slide
-from app.schemas import ChapterUpdate, ChapterResponse, SlideResponse
+from app.db import get_db, User, Subject, Chapter, Slide
+from app.schemas import ChapterCreate, ChapterUpdate, ChapterResponse, SlideResponse
 from app.api.deps import get_current_user
 from app.services import bg_tasks
 
 router = APIRouter()
+
+
+@router.post("/", response_model=ChapterResponse)
+async def create_chapter(
+    chapter: ChapterCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create chapter - only owner of the subject"""
+    # Get subject
+    result = await db.execute(
+        select(Subject).where(Subject.id == chapter.subject_id)
+    )
+    subject = result.scalar_one_or_none()
+    
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found to create chapter for")
+    
+    # Check ownership
+    if current_user.id != subject.user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    
+    # Create chapter
+    db_chapter = Chapter(subject_id=chapter.subject_id, 
+                         title=chapter.title, 
+                         page_start=chapter.page_start, 
+                         page_end=chapter.page_end,
+                         order_index=chapter.order_index)
+    
+    db.add(db_chapter)
+    await db.commit()
+    await db.refresh(db_chapter)
+    
+    return db_chapter
 
 @router.patch("/{chapter_id}", response_model=ChapterResponse)
 async def update_chapter(

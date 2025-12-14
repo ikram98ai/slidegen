@@ -86,6 +86,14 @@ export interface ChapterResponse {
   updated_at?: string | null;
 }
 
+export interface ChapterCreate {
+  subject_id:number
+  title: string;
+  page_start: number;
+  page_end: number;
+  order_index: number
+}
+
 export interface ChapterUpdate {
   title?: string | null;
   page_start?: number | null;

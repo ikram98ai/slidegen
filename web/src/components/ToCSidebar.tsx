@@ -1,5 +1,7 @@
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, PlusCircle } from "lucide-react";
 import type { ChapterResponse, SubjectResponse } from "../types";
+import { AddChpater } from "./AddChapter";
+import { useState } from "react";
 
 interface ToCSidbarProps {
   subject: SubjectResponse;
@@ -19,6 +21,7 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
   onSetCurrentHorizontalIndex,
   onCloseSubject,
 }) => {
+  const [isCreating, setIsCreating] = useState(false);
   return (
     <div className="w-80 bg-white border-r border-gray-200 shrink-0 flex flex-col h-full z-10">
       <div className="p-6 border-b border-gray-100 flex items-center space-x-3">
@@ -37,7 +40,20 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
           </p>
         </div>
       </div>
+      <button
+        onClick={() => setIsCreating(true)}
+        className="p-4 self-center text-gray-400  hover:text-blue-500 hover:bg-blue-50 rounded-full transition-all"
+        title="Add Chapter Manually"
+      >
+        <PlusCircle size={30} />
+      </button>
+
       <div className="overflow-y-auto flex-1 p-4 space-y-2">
+        <AddChpater
+          subjectId={subject.id}
+          isCreating={isCreating}
+          onSetIsCreating={setIsCreating}
+        />
         {chapters?.map((chapter, index) => (
           <button
             key={chapter.id}

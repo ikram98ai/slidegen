@@ -10,6 +10,7 @@ import type {
   SlideResponse,
   SlideUpdate,
   SubjectDetailResponse,
+  ChapterCreate,
 } from "../types";
 
 export const authApi = {
@@ -113,6 +114,11 @@ export const subjectsApi = {
 };
 
 export const chaptersApi = {
+  createChapter: async (data: ChapterCreate): Promise<ChapterResponse> => {
+    const response = await api.post<ChapterResponse>(`/api/chapters`, data);
+    return response.data;
+  },
+
   updateChapter: async (
     chapterId: number,
     data: ChapterUpdate
@@ -123,6 +129,7 @@ export const chaptersApi = {
     );
     return response.data;
   },
+
   deleteChapter: async (chapterId: number): Promise<void> => {
     await api.delete(`/api/chapters/${chapterId}`);
   },

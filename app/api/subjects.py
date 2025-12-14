@@ -95,7 +95,7 @@ async def get_subject(
     subject_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all chapters for a subject"""
+    """Get a subject"""
     # Get subject
     result = await db.execute(select(Subject).where(Subject.id == subject_id))
     subject = result.scalar_one_or_none()
