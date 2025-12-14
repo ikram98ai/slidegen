@@ -1,7 +1,9 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select, update
-import fitz, uuid, os
-from app.db import Subject, SubjectType, Lesson, Slide
+import fitz
+import uuid
+import os
+from app.db import Subject, SubjectType, Chapter, Slide
 from app.services import ai, storage
 import numpy as np 
 
@@ -20,7 +22,7 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
             )
             await db.commit()
             
-            # Extract lessons if it's a book
+            # Extract chapters if it's a book
             result = await db.execute(select(Subject).where(Subject.id == subject_id))
             subject = result.scalar_one_or_none()
 
@@ -37,29 +39,29 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
                 toc_list = doc.get_toc()    
                 toc = "\n".join(toc_list)
 
-                lessons_data = await ai.analyze_book_toc(toc)
+                chapters_data = await ai.analyze_book_toc(toc)
                 
-                # Save lessons
-                for i, lesson_data in enumerate(lessons_data):
-                    lesson = Lesson(
+                # Save chapters
+                for i, chapter_data in enumerate(chapters_data):
+                    chapter = Chapter(
                         subject_id=subject_id,
-                        title=lesson_data.title,
-                        page_start=lesson_data.page_start,
-                        page_end=lesson_data.page_end,
+                        title=chapter_data.title,
+                        page_start=chapter_data.page_start,
+                        page_end=chapter_data.page_end,
                         order_index=i
                     )
-                    db.add(lesson)
+                    db.add(chapter)
                 await db.commit()
             else:
-                # For reports, create a single lesson
-                lesson = Lesson(
+                # For reports, create a single chapter
+                chapter = Chapter(
                     subject_id=subject_id,
                     title="Report Content",
                     page_start=1,
                     page_end=doc.page_count,
                     order_index=0
                 )
-                db.add(lesson)
+                db.add(chapter)
                 await db.commit()
             
             # Update status to completed
@@ -88,7 +90,7 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
 
 
 
-async def generate_slides_background(lesson: Lesson):
+async def generate_slides_background(chapter: Chapter):
     """Background task to generate slides"""
     from app.db import AsyncSessionLocal
     
@@ -96,16 +98,16 @@ async def generate_slides_background(lesson: Lesson):
         file_path = None
         try:
 
-            file_path = storage.download_file(lesson.subject.file_path)
+            file_path = storage.download_file(chapter.subject.file_path)
             if not file_path:
                 raise Exception("Failed to download file from S3")
                 
             doc = fitz.open(file_path)
-            pages = list(np.arange(lesson.page_start-1, lesson.page_end-1))
+            pages = list(np.arange(chapter.page_start-1, chapter.page_end-1))
             doc.select(pages)
             chapter_text = "\n".join([page.get_text() for page in doc])
             
-            slides_data = await ai.generate_chapter_slides(lesson.title, chapter_text)
+            slides_data = await ai.generate_chapter_slides(chapter.title, chapter_text)
             
             if not slides_data:
                 return
@@ -125,7 +127,7 @@ async def generate_slides_background(lesson: Lesson):
 
                 # Create slide
                 slide = Slide(
-                    lesson_id=lesson.id,
+                    chapter_id=chapter.id,
                     title=slide_data.title,
                     points=slide_data.bullets,
                     explanation=slide_data.explanation,
@@ -138,7 +140,7 @@ async def generate_slides_background(lesson: Lesson):
             
         except Exception as e:
             import traceback
-            print(f"Error generating slides for lesson {lesson.id}: {e}")
+            print(f"Error generating slides for chapter {chapter.id}: {e}")
             traceback.print_exc()
         finally:
             if file_path and os.path.exists(file_path):

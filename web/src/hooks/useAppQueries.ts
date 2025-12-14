@@ -1,11 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { authApi, subjectsApi, slidesApi, usersApi, lessonsApi } from "../services/api";
+import {
+  authApi,
+  subjectsApi,
+  slidesApi,
+  usersApi,
+  chaptersApi,
+} from "../services/api";
 import type {
   SlideUpdate,
   SubjectResponse,
-  LessonResponse,
   SubjectCreate,
   SlideResponse,
+  SubjectDetailResponse,
 } from "../types";
 import { DocType } from "../types";
 import { useAuthStore } from "../store/authStore";
@@ -60,10 +66,11 @@ export const useSubjects = () => {
   });
 };
 
-export const useSubject = (subjectId:number | undefined) => {
-  return useQuery<SubjectResponse>({
+export const useSubject = (subjectId: number | null) => {
+  return useQuery<SubjectResponse | null>({
     queryKey: ["subjects"],
     queryFn: async () => {
+      if (!subjectId) return null;
       const subject = await subjectsApi.getSubject(subjectId);
       return subject;
     },
@@ -81,14 +88,14 @@ export const useUserSubjects = (userId: number | undefined) => {
   });
 };
 
-export const useSubjectLessons = (subjectId: number | null) => {
-  return useQuery<LessonResponse[]>({
+export const useSubjectChapters = (subjectId: number | null) => {
+  return useQuery<SubjectDetailResponse | null>({
     queryKey: ["subject", subjectId],
     queryFn: async () => {
-      if (!subjectId) return [];
+      if (!subjectId) return null;
 
-      const lessons = await subjectsApi.getSubjectLessons(subjectId);
-      return lessons;
+      const chapters = await subjectsApi.getSubjectChapters(subjectId);
+      return chapters;
     },
     enabled: !!subjectId,
   });
@@ -143,19 +150,18 @@ export const useDeleteSubject = () => {
   });
 };
 
-export const useLessonSlides = (lessonId: number) => {
+export const useChapterSlides = (chapterId: number) => {
   return useQuery<SlideResponse[]>({
-    queryKey: ["lessons", lessonId],
+    queryKey: ["chapters", chapterId],
     queryFn: async () => {
-      if (!lessonId) return [];
+      if (!chapterId) return [];
 
-      const slides = await lessonsApi.getLessonSlides(lessonId);
+      const slides = await chaptersApi.getChapterSlides(chapterId);
       return slides;
     },
-    enabled: !!lessonId,
+    enabled: !!chapterId,
   });
 };
-
 
 export const useUpdateSlide = () => {
   return useMutation({

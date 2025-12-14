@@ -1,6 +1,6 @@
 # app/models/base.py
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, DateTime, func, String, Boolean, Text, ARRAY
+from sqlalchemy import Column, Integer, DateTime, func, String, Boolean, Text
 from sqlalchemy import ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -63,28 +63,28 @@ class Subject(BaseModel):
     processing_status = Column(String, default="pending")  # pending, processing, completed, failed
     
     owner = relationship("User", back_populates="subjects")
-    lessons = relationship("Lesson", back_populates="subject", cascade="all, delete-orphan")
+    chapters = relationship("Chapter", back_populates="subject", cascade="all, delete-orphan")
 
 
-class Lesson(BaseModel):
-    __tablename__ = "lessons"
+class Chapter(BaseModel):
+    __tablename__ = "chapters"
     subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=False)
     page_start = Column(Integer, nullable=False)
     page_end = Column(Integer, nullable=False)
     order_index = Column(Integer, nullable=False)
     
-    subject = relationship("Subject", back_populates="lessons")
-    slides = relationship("Slide", back_populates="lesson", cascade="all, delete-orphan")
+    subject = relationship("Subject", back_populates="chapters")
+    slides = relationship("Slide", back_populates="chapter", cascade="all, delete-orphan")
 
 
 class Slide(BaseModel):
     __tablename__ = "slides"
-    lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False)
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=False)
     points = Column(Text, nullable=False)
     explanation = Column(Text, nullable=False)
     voice_url = Column(String, nullable=True)
     order_index = Column(Integer, nullable=False)
     
-    lesson = relationship("Lesson", back_populates="slides")
+    chapter = relationship("Chapter", back_populates="slides")

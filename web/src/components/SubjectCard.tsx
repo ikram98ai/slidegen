@@ -11,8 +11,9 @@ import {
 import type { SubjectResponse } from "../types";
 import { DocType } from "../types";
 import { useUpdateSubject, useDeleteSubject } from "../hooks/useAppQueries";
-import { Modal } from "./Modal";
-import { Button } from "./Button";
+import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
+import { useAuthStore } from "../store/authStore";
 
 interface SubjectCardProps {
   subject: SubjectResponse;
@@ -28,6 +29,7 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
 
   const updateSubject = useUpdateSubject();
   const deleteSubject = useDeleteSubject();
+  const { user } = useAuthStore();
 
   const handleUpdate = () => {
     updateSubject.mutate({ id: subject.id, data: { title: editedTitle } });
@@ -61,8 +63,8 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
             w-12 h-12 rounded-2xl flex items-center justify-center transition-colors duration-300
             ${
               subject.type === DocType.BOOK
-                ? "bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
-                : "bg-purple-50 text-purple-600 group-hover:bg-purple-600 group-hover:text-white"
+                ? "bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
+                : "bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white"
             }
           `}
           >
@@ -72,29 +74,31 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
               <FileText size={24} />
             )}
           </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsEditing(true);
-              }}
-              className="p-2 rounded-full hover:bg-gray-100"
-            >
-              <Pencil size={16} />
-            </button>
-            <button
-              onClick={handleDelete}
-              className="p-2 rounded-full hover:bg-red-300"
-            >
-              <Trash2 size={16} />
-            </button>
-            <button
-              onClick={toggleVisibility}
-              className="p-2 rounded-full hover:bg-gray-100"
-            >
-              {subject.is_public ? <Eye size={16} /> : <EyeOff size={16} />}
-            </button>
-          </div>
+          {user && user.id === subject.user_id && (
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                className="p-2 rounded-full hover:bg-gray-100"
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                onClick={handleDelete}
+                className="p-2 rounded-full hover:bg-red-300"
+              >
+                <Trash2 size={16} />
+              </button>
+              <button
+                onClick={toggleVisibility}
+                className="p-2 rounded-full hover:bg-gray-100"
+              >
+                {subject.is_public ? <Eye size={16} /> : <EyeOff size={16} />}
+              </button>
+            </div>
+          )}
         </div>
         <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 leading-tight group-hover:text-blue-600 transition-colors">
           {subject.title}

@@ -1,35 +1,35 @@
 import React from "react";
 import { ChevronLeft, ChevronRight, Layout } from "lucide-react";
 import { SlideCard } from "./SlideCard";
-import { useLessonSlides } from "../hooks/useAppQueries";
-import { Button } from "./Button";
-import { lessonsApi } from "../services/api";
+import { useChapterSlides } from "../hooks/useAppQueries";
+import { Button } from "./ui/Button";
+import { chaptersApi } from "../services/api";
 
 interface SlidesViewerProps {
   viewMode: "vertical" | "horizontal";
   currentHorizontalIndex: number;
   setCurrentHorizontalIndex: (index: number) => void;
-  lessonId: number;
+  chapterId: number;
 }
 
 export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   viewMode,
   currentHorizontalIndex,
   setCurrentHorizontalIndex,
-  lessonId,
+  chapterId,
 }) => {
-  const { data: slides } = useLessonSlides(lessonId);
+  const { data: slides } = useChapterSlides(chapterId);
 
   const generateSlidesForActiveChapter = async () => {
-    if (isNaN(lessonId)) return;
+    if (isNaN(chapterId)) return;
     try {
-      await lessonsApi.generateSlides(lessonId);
+      await chaptersApi.generateSlides(chapterId);
       alert("Slides generation started. Please check back in a few moments.");
     } catch {
       alert("Failed to start slides generation.");
     }
   };
-  
+
   if (viewMode === "vertical") {
     return (
       <div className="grid grid-cols-1 gap-8">

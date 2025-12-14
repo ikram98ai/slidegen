@@ -11,23 +11,6 @@ export const Tab = {
 } as const;
 export type Tab = (typeof Tab)[keyof typeof Tab];
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  dp: string;
-}
-
-export interface Slide {
-  id?: number; // Added for API integration
-  title: string;
-  bullets: string[];
-  explanation: string; // Detailed text explanation for the slide
-  audio_url?: string; // Base64 encoded audio data (WAV format)
-  isLoadingAudio?: boolean; // UI state for audio generation
-}
-
-
 // API Types
 
 export interface Token {
@@ -59,17 +42,30 @@ export interface UserResponse {
 export interface SubjectCreate {
   title: string;
   file: File;
-  type:DocType;
+  type: DocType;
 }
 
 export interface SubjectResponse {
   title: string;
   is_public: boolean;
-  type:DocType;
+  type: DocType;
   id: number;
   user_id: number;
   file_path: string;
   processing_status: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SubjectDetailResponse {
+  title: string;
+  is_public: boolean;
+  type: DocType;
+  id: number;
+  user_id: number;
+  file_path: string;
+  processing_status: string;
+  chapters?: ChapterResponse[];
   created_at: string;
   updated_at?: string | null;
 }
@@ -79,7 +75,7 @@ export interface SubjectUpdate {
   is_public?: boolean | null;
 }
 
-export interface LessonResponse {
+export interface ChapterResponse {
   title: string;
   page_start: number;
   page_end: number;
@@ -90,7 +86,7 @@ export interface LessonResponse {
   updated_at?: string | null;
 }
 
-export interface LessonUpdate {
+export interface ChapterUpdate {
   title?: string | null;
   page_start?: number | null;
   page_end?: number | null;
@@ -103,14 +99,14 @@ export interface SlideResponse {
   explanation: string;
   order_index: number;
   id: number;
-  lesson_id: number;
+  chapter_id: number;
   voice_url?: string | null;
   created_at: string;
   updated_at?: string | null;
 }
 
 export interface SlideUpdate {
-  id?: number
+  id?: number;
   title?: string | null;
   points?: string[] | null;
   explanation?: string | null;

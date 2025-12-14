@@ -16,12 +16,12 @@ tts = init_chat_model(model=TTS_MODEL_NAME, api_key=settings.GEMINI_API_KEY)
 
 # --- MAIN SERVICES ---
 
-class LessonData(BaseModel):
+class ChapterData(BaseModel):
     title: str
     page_start: int
     page_end: int
 
-async def analyze_book_toc(toc: str) -> List[LessonData]:
+async def analyze_book_toc(toc: str) -> List[ChapterData]:
     prompt = f"""
     You are an expert educational content analyzer.
     Analyze the Table of Contents.
@@ -34,7 +34,7 @@ async def analyze_book_toc(toc: str) -> List[LessonData]:
     """
 
     try:
-        analyze_toc = llm.with_structured_output(List[LessonData])
+        analyze_toc = llm.with_structured_output(List[ChapterData])
         response = await analyze_toc.ainvoke(prompt) 
         return response
     except Exception as error:

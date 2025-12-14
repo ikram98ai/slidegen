@@ -1,13 +1,13 @@
 import React from "react";
 import { Sparkles, LogIn, LogOut } from "lucide-react";
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore } from "../store/authStore";
 
-import { Button } from "./Button";
+import { Button } from "./ui/Button";
 
 interface HeaderProps {
   isAuthenticated: boolean;
   userName?: string;
-  dp?:string
+  dp?: string;
   onLogoClick: () => void;
   onSignInClick: () => void;
   onProfileClick: () => void;
@@ -21,8 +21,8 @@ export const Header: React.FC<HeaderProps> = ({
   onSignInClick,
   onProfileClick,
 }) => {
-    const { logout } = useAuthStore();
-  
+  const { logout } = useAuthStore();
+
   return (
     <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -44,11 +44,14 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-8 h-8 rounded-full border border-gray-300 overflow-hidden bg-gray-100 flex items-center justify-center cursor-pointer"
               onClick={onProfileClick}
             >
-            <img
-              src={dp || `https://ui-avatars.com/api/?name=${userName}&background=random`}
-              alt="Profile"
-              className=" rounded-full object-cover"
-            />
+              <img
+                src={
+                  dp ||
+                  `https://ui-avatars.com/api/?name=${userName}&background=random`
+                }
+                alt="Profile"
+                className=" rounded-full object-cover"
+              />
             </div>
             <button
               onClick={logout}

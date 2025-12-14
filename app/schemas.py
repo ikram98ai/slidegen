@@ -75,22 +75,25 @@ class SubjectInDB(SubjectBase):
 class SubjectResponse(SubjectInDB):
     pass
 
-class LessonBase(BaseModel):
+class SubjectDetailResponse(SubjectInDB):
+    chapters: Optional[List['ChapterResponse']]
+
+class ChapterBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     page_start: int = Field(..., ge=1)
     page_end: int = Field(..., ge=1)
     order_index: int = Field(..., ge=0)
 
-class LessonCreate(LessonBase):
+class ChapterCreate(ChapterBase):
     subject_id: int
 
-class LessonUpdate(BaseModel):
+class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     page_start: Optional[int] = Field(None, ge=1)
     page_end: Optional[int] = Field(None, ge=1)
     order_index: Optional[int] = Field(None, ge=0)
 
-class LessonInDB(LessonBase):
+class ChapterInDB(ChapterBase):
     id: int
     subject_id: int
     created_at: datetime
@@ -99,16 +102,16 @@ class LessonInDB(LessonBase):
     class Config:
         from_attributes = True
 
-class LessonResponse(LessonInDB):
+class ChapterResponse(ChapterInDB):
     pass
 
-class LessonWithSlides(LessonResponse):
+class ChapterWithSlides(ChapterResponse):
     slides: List['SlideResponse'] = []
     
     class Config:
         from_attributes = True
 
-class LessonWithSubject(LessonResponse):
+class ChapterWithSubject(ChapterResponse):
     subject_title: str
     subject_type: SubjectType
     subject_is_public: bool
@@ -139,7 +142,7 @@ class SlideUpdate(BaseModel):
 
 class SlideResponse(SlideBase):
     id: int
-    lesson_id: int
+    chapter_id: int
     voice_url: Optional[str]
     created_at: datetime
     updated_at: Optional[datetime] = None

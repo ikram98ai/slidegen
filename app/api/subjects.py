@@ -1,5 +1,5 @@
 # app/api/subjects.py
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,8 +8,8 @@ from sqlalchemy import select
 import uuid
 from pathlib import Path
 
-from app.db import get_db, User, Subject, SubjectType, Lesson
-from app.schemas import  SubjectUpdate, SubjectResponse, LessonResponse
+from app.db import get_db, User, Subject, SubjectType, Chapter
+from app.schemas import  SubjectUpdate, SubjectResponse, SubjectDetailResponse
 from app.api.deps import get_current_user
 from app.services import storage, bg_tasks
 
@@ -91,11 +91,11 @@ async def upload_subject(
     return subject
 
 @router.get("/{subject_id}", response_model=SubjectResponse)
-async def get_subject_lessons(
+async def get_subject(
     subject_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all lessons for a subject"""
+    """Get all chapters for a subject"""
     # Get subject
     result = await db.execute(select(Subject).where(Subject.id == subject_id))
     subject = result.scalar_one_or_none()
@@ -105,13 +105,12 @@ async def get_subject_lessons(
     
     return subject
 
-@router.get("/{subject_id}/lessons", response_model=List[LessonResponse])
-async def get_subject_lessons(
+@router.get("/{subject_id}/chapters", response_model=SubjectDetailResponse)
+async def get_subject_chapters(
     subject_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user)
 ):
-    """Get all lessons for a subject"""
+    """Get all chapters for a subject"""
     # Get subject
     result = await db.execute(select(Subject).where(Subject.id == subject_id))
     subject = result.scalar_one_or_none()
@@ -119,19 +118,27 @@ async def get_subject_lessons(
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
     
-    # Check permissions
-    if not subject.is_public and (not current_user or current_user.id != subject.user_id):
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    
-    # Get lessons
+
+    # Get chapters
     result = await db.execute(
-        select(Lesson)
-        .where(Lesson.subject_id == subject_id)
-        .order_by(Lesson.order_index)
+        select(Chapter)
+        .where(Chapter.subject_id == subject_id)
+        .order_by(Chapter.order_index)
     )
-    lessons = result.scalars().all()
-    
-    return lessons
+    chapters = result.scalars().all()
+
+    response = SubjectDetailResponse(
+                id= subject.id, 
+                user_id= subject.user_id,
+                title= subject.title,
+                is_public= subject.is_public,
+                type= subject.type,
+                file_path= subject.file_path,
+                processing_status= subject.processing_status,
+                created_at= subject.created_at,
+                chapters= chapters
+            )
+    return response
 
 @router.patch("/{subject_id}", response_model=SubjectResponse)
 async def update_subject(
@@ -182,6 +189,6 @@ async def delete_subject(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
  
-    # Delete subject (cascade will delete lessons and slides)
+    # Delete subject (cascade will delete chapters and slides)
     await db.delete(subject)
     await db.commit()

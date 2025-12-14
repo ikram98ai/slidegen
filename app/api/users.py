@@ -1,6 +1,6 @@
 # app/api/users.py
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
@@ -9,7 +9,6 @@ from app.services import storage
 from app.db import get_db, Subject, User
 from app.schemas import UserResponse, UserUpdate, SubjectResponse
 from app.api.deps import get_current_user
-from app.config import settings
 
 router = APIRouter()
 

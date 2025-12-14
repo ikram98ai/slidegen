@@ -1,34 +1,35 @@
-import { api } from '../lib/axios';
+import { api } from "../lib/axios";
 import type {
   UserCreate,
   UserResponse,
   Token,
   SubjectResponse,
   SubjectUpdate,
-  LessonResponse,
-  LessonUpdate,
+  ChapterResponse,
+  ChapterUpdate,
   SlideResponse,
   SlideUpdate,
-} from '../types';
+  SubjectDetailResponse,
+} from "../types";
 
 export const authApi = {
   register: async (data: UserCreate): Promise<UserResponse> => {
-    const response = await api.post<UserResponse>('/api/auth/register', data);
+    const response = await api.post<UserResponse>("/api/auth/register", data);
     return response.data;
   },
   login: async (formData: URLSearchParams): Promise<Token> => {
-    const response = await api.post<Token>('/api/auth/token', formData, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const response = await api.post<Token>("/api/auth/token", formData, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
     });
     return response.data;
   },
   refreshToken: async (refreshToken: string): Promise<Token> => {
-    const response = await api.post<Token>('/api/auth/refresh', null, {
+    const response = await api.post<Token>("/api/auth/refresh", null, {
       params: { refresh_token: refreshToken },
     });
     return response.data;
   },
-  
+
   me: async (): Promise<UserResponse> => {
     const response = await api.get<UserResponse>(`/api/auth/me`);
     return response.data;
@@ -42,45 +43,68 @@ export const usersApi = {
   },
   updateUser: async (data: FormData): Promise<UserResponse> => {
     const response = await api.patch<UserResponse>(`/api/users/me`, data, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { "Content-Type": "multipart/form-data" },
     });
     return response.data;
   },
   deleteUser: async (): Promise<void> => {
     await api.delete(`/api/users/me`);
   },
-  getUserSubjects: async (userId: number, skip = 0, limit = 100): Promise<SubjectResponse[]> => {
-    const response = await api.get<SubjectResponse[]>(`/api/users/${userId}/subjects`, {
-      params: { skip, limit },
-    });
+  getUserSubjects: async (
+    userId: number,
+    skip = 0,
+    limit = 100
+  ): Promise<SubjectResponse[]> => {
+    const response = await api.get<SubjectResponse[]>(
+      `/api/users/${userId}/subjects`,
+      {
+        params: { skip, limit },
+      }
+    );
     return response.data;
   },
 };
 
 export const subjectsApi = {
   listSubjects: async (skip = 0, limit = 100): Promise<SubjectResponse[]> => {
-    const response = await api.get<SubjectResponse[]>('/api/subjects/', {
+    const response = await api.get<SubjectResponse[]>("/api/subjects/", {
       params: { skip, limit },
     });
     return response.data;
   },
 
-  getSubject: async (subjectId:number): Promise<SubjectResponse> => {
-    const response = await api.get<SubjectResponse>(`/api/subjects/${subjectId}`);
+  getSubject: async (subjectId: number): Promise<SubjectResponse> => {
+    const response = await api.get<SubjectResponse>(
+      `/api/subjects/${subjectId}`
+    );
     return response.data;
   },
   uploadSubject: async (formData: FormData): Promise<SubjectResponse> => {
-    const response = await api.post<SubjectResponse>('/api/subjects/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const response = await api.post<SubjectResponse>(
+      "/api/subjects/upload",
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+      }
+    );
     return response.data;
   },
-  getSubjectLessons: async (subjectId: number): Promise<LessonResponse[]> => {
-    const response = await api.get<LessonResponse[]>(`/api/subjects/${subjectId}/lessons`);
+  getSubjectChapters: async (
+    subjectId: number
+  ): Promise<SubjectDetailResponse> => {
+    const response = await api.get<SubjectDetailResponse>(
+      `/api/subjects/${subjectId}/chapters`
+    );
     return response.data;
   },
-  updateSubject: async (subjectId: number, data: SubjectUpdate): Promise<SubjectResponse> => {
-    const response = await api.patch<SubjectResponse>(`/api/subjects/${subjectId}`, data);
+  updateSubject: async (
+    subjectId: number,
+    data: SubjectUpdate
+  ): Promise<SubjectResponse> => {
+    const response = await api.patch<SubjectResponse>(
+      `/api/subjects/${subjectId}`,
+      data
+    );
     return response.data;
   },
   deleteSubject: async (subjectId: number): Promise<void> => {
@@ -88,26 +112,40 @@ export const subjectsApi = {
   },
 };
 
-export const lessonsApi = {
-  updateLesson: async (lessonId: number, data: LessonUpdate): Promise<LessonResponse> => {
-    const response = await api.patch<LessonResponse>(`/api/lessons/${lessonId}`, data);
+export const chaptersApi = {
+  updateChapter: async (
+    chapterId: number,
+    data: ChapterUpdate
+  ): Promise<ChapterResponse> => {
+    const response = await api.patch<ChapterResponse>(
+      `/api/chapters/${chapterId}`,
+      data
+    );
     return response.data;
   },
-  deleteLesson: async (lessonId: number): Promise<void> => {
-    await api.delete(`/api/lessons/${lessonId}`);
+  deleteChapter: async (chapterId: number): Promise<void> => {
+    await api.delete(`/api/chapters/${chapterId}`);
   },
-  generateSlides: async (lessonId: number): Promise<void> => {
-    await api.post(`/api/lessons/${lessonId}/slides/generate`);
+  generateSlides: async (chapterId: number): Promise<void> => {
+    await api.post(`/api/chapters/${chapterId}/slides/generate`);
   },
-  getLessonSlides: async (lessonId: number): Promise<SlideResponse[]> => {
-    const response = await api.get<SlideResponse[]>(`/api/lessons/${lessonId}/slides`);
+  getChapterSlides: async (chapterId: number): Promise<SlideResponse[]> => {
+    const response = await api.get<SlideResponse[]>(
+      `/api/chapters/${chapterId}/slides`
+    );
     return response.data;
   },
 };
 
 export const slidesApi = {
-  updateSlide: async (slideId: number, data: SlideUpdate): Promise<SlideResponse> => {
-    const response = await api.patch<SlideResponse>(`/api/slides/${slideId}`, data);
+  updateSlide: async (
+    slideId: number,
+    data: SlideUpdate
+  ): Promise<SlideResponse> => {
+    const response = await api.patch<SlideResponse>(
+      `/api/slides/${slideId}`,
+      data
+    );
     return response.data;
   },
   deleteSlide: async (slideId: number): Promise<void> => {

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.db import get_db, User, Slide, Lesson
+from app.db import get_db, User, Slide, Chapter
 from app.schemas import SlideUpdate, SlideResponse
 from app.api.deps import get_current_user
 
@@ -18,11 +18,11 @@ async def update_slide(
     current_user: User = Depends(get_current_user)
 ):
     """Update slide - only owner"""
-    # Get slide with lesson and subject
+    # Get slide with chapter and subject
     result = await db.execute(
         select(Slide)
         .options(
-            selectinload(Slide.lesson).selectinload(Lesson.subject)
+            selectinload(Slide.chapter).selectinload(Chapter.subject)
         )
         .where(Slide.id == slide_id)
     )
@@ -32,7 +32,7 @@ async def update_slide(
         raise HTTPException(status_code=404, detail="Slide not found")
     
     # Check ownership
-    if current_user.id != slide.lesson.subject.user_id:
+    if current_user.id != slide.chapter.subject.user_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Update slide
@@ -53,11 +53,11 @@ async def delete_slide(
     current_user: User = Depends(get_current_user)
 ):
     """Delete slide - only owner"""
-    # Get slide with lesson and subject
+    # Get slide with chapter and subject
     result = await db.execute(
         select(Slide)
         .options(
-            selectinload(Slide.lesson).selectinload(Lesson.subject)
+            selectinload(Slide.chapter).selectinload(Chapter.subject)
         )
         .where(Slide.id == slide_id)
     )
@@ -67,7 +67,7 @@ async def delete_slide(
         raise HTTPException(status_code=404, detail="Slide not found")
     
     # Check ownership
-    if current_user.id != slide.lesson.subject.user_id:
+    if current_user.id != slide.chapter.subject.user_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Delete slide

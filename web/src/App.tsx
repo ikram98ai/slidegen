@@ -4,7 +4,7 @@ import { Header } from "./components/Header";
 import { useAuthStore } from "./store/authStore";
 import { useUIStore } from "./store/uiStore";
 import { AuthScreen } from "./components/AuthScreen";
-import { Button } from "./components/Button";
+import { Button } from "./components/ui/Button";
 import { FilesPage } from "./pages/FilesPage";
 import { UploadPage } from "./pages/UploadPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -42,9 +42,9 @@ function App() {
         isAuthenticated={isAuthenticated}
         userName={user?.full_name}
         dp={user?.dp}
-        onLogoClick={() => navigate('/')}
+        onLogoClick={() => navigate("/")}
         onSignInClick={() => setShowAuthModal(true)}
-        onProfileClick={() => navigate('/profile')}
+        onProfileClick={() => navigate("/profile")}
       />
 
       <main className="relative">

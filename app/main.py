@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api import auth, users, subjects, lessons, slides
+from app.api import auth, users, subjects, chapters, slides
 from app.db import engine, Base
 from logging import getLogger
 logger = getLogger(__name__)
@@ -41,7 +41,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(subjects.router, prefix="/api/subjects", tags=["subjects"])
-app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])
+app.include_router(chapters.router, prefix="/api/chapters", tags=["chapters"])
 app.include_router(slides.router, prefix="/api/slides", tags=["slides"])
 
 @app.get("/")
