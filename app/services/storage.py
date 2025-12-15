@@ -98,13 +98,14 @@ def upload_file(file, object_name):
 
 def download_file(object_name):
     """Download a file from an S3 bucket"""
+    file_path = object_name.split("/")[-1]
     try:
-        with open(object_name.split("/")[-1], 'wb') as f:
-            file = s3_client.download_fileobj(settings.S3_BUCKET_NAME, object_name, f)
+        with open(file_path, "wb") as f:
+            s3_client.download_fileobj(settings.S3_BUCKET_NAME, object_name, f)
     except ClientError as e:
         logger.error(e)
         return None
-    return file
+    return file_path
 
 
 def get_presigned_url(object_name, expiration=3600):

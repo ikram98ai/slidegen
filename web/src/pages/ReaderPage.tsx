@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useSubjectChapters } from "../hooks/useAppQueries";
 import { LayoutTemplate, Rows } from "lucide-react";
@@ -23,11 +23,11 @@ export const ReaderPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.HORIZONTAL);
   const [currentHorizontalIndex, setCurrentHorizontalIndex] = useState(0);
 
-  const resetViewer = () => {
+  const resetViewer = useCallback(() => {
     setActiveViewerChapter(undefined);
     setViewMode(ViewMode.HORIZONTAL);
     setCurrentHorizontalIndex(0);
-  };
+  }, []);
 
   useEffect(() => {
     resetViewer();

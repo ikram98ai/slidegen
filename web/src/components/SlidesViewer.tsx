@@ -45,7 +45,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
     );
   } else {
     // Horizontal (Presentation) Mode
-    if (slides === undefined)
+    if (slides === undefined || slides.length === 0)
       return (
         <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
           <Layout className="w-16 h-16 text-gray-300 mb-4" />

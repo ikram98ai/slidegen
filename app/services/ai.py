@@ -21,6 +21,9 @@ class ChapterData(BaseModel):
     page_start: int
     page_end: int
 
+class Chapters(BaseModel):
+    chapters: List[ChapterData]
+
 async def analyze_book_toc(toc: str) -> List[ChapterData]:
     prompt = f"""
     You are an expert educational content analyzer.
@@ -34,9 +37,9 @@ async def analyze_book_toc(toc: str) -> List[ChapterData]:
     """
 
     try:
-        analyze_toc = llm.with_structured_output(List[ChapterData])
+        analyze_toc = llm.with_structured_output(Chapters)
         response = await analyze_toc.ainvoke(prompt) 
-        return response
+        return response.chapters
     except Exception as error:
         print(f"Book analysis failed: {error}")
         raise Exception("Failed to analyze book structure.")
@@ -47,19 +50,22 @@ class SlideData(BaseModel):
     title: str
     bullets: List[str]
     explanation: str
+
+class Slides(BaseModel):
+    slides: List[SlideData]
     
-async def generate_chapter_slides(chapter_title: str, chapter_desc: str) -> List[SlideData]:
+async def generate_slides(page_text: str) -> List[SlideData]:
     prompt = f"""
     You are an expert presentation designer.
-    Create detailed educational presentation slides specifically for the chapter titled: "{chapter_title}".
-    Context for this chapter: "{chapter_desc}".
+    Create detailed educational presentation slides.
+    Context for the slides: "{page_text}".
     """
 
     try:
-        generate_slides = llm.with_structured_output(List[SlideData])
+        generate_slides = llm.with_structured_output(Slides)
         response = await generate_slides.ainvoke(prompt)
 
-        return response
+        return response.slides
 
     except Exception as error:
         print(f"Chapter slide generation failed: {error}")

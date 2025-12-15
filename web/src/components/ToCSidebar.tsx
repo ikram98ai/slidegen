@@ -58,9 +58,7 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
           <button
             key={chapter.id}
             onClick={() => {
-              onSetActiveViewerChapter(
-                chapters.find((c) => c.id === activeViewerChapter?.id)
-              );
+              onSetActiveViewerChapter(chapter);
               onSetCurrentHorizontalIndex(0);
             }}
             className={`
@@ -92,6 +90,7 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
               >
                 {chapter.title}
               </h3>
+              <span className="text-xs text-gray-400">page: {chapter.page_start} - {chapter.page_end}</span>
             </div>
           </button>
         ))}

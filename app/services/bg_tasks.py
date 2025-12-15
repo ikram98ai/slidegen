@@ -4,13 +4,13 @@ import fitz
 import uuid
 import os
 from app.db import Subject, SubjectType, Chapter, Slide
+from app.db import AsyncSessionLocal
 from app.services import ai, storage
 import numpy as np 
 
 async def process_subject_background(subject_id: int, file_s3path:str ):
     """Background task to process uploaded subject"""
-    from app.db import AsyncSessionLocal
-    
+    print("process subject background task started...")
     async with AsyncSessionLocal() as db:
         file_path = None
         try:
@@ -36,8 +36,14 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
 
             if subject and subject.type == SubjectType.BOOK:
 
-                toc_list = doc.get_toc()    
-                toc = "\n".join(toc_list)
+                toc_list = doc.get_toc()   
+                toc = "" 
+                for item in toc_list:
+                    level, title, page_num = item[0], item[1], item[2]
+                    # Use indentation based on the hierarchy level (lvl - 1)
+                    indent = "  " * (level - 1)
+                    toc = f"{indent}- {title} (Page {page_num})"
+                    print(toc)
 
                 chapters_data = await ai.analyze_book_toc(toc)
                 
@@ -56,7 +62,7 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
                 # For reports, create a single chapter
                 chapter = Chapter(
                     subject_id=subject_id,
-                    title="Report Content",
+                    title=subject.title + "'s Report",
                     page_start=1,
                     page_end=doc.page_count,
                     order_index=0
@@ -87,13 +93,16 @@ async def process_subject_background(subject_id: int, file_s3path:str ):
         finally:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
+        
+        print("process subject background task completed.")
 
 
 
 async def generate_slides_background(chapter: Chapter):
     """Background task to generate slides"""
-    from app.db import AsyncSessionLocal
     
+    print("generate slides background task started...")
+
     async with AsyncSessionLocal() as db:
         file_path = None
         try:
@@ -103,40 +112,49 @@ async def generate_slides_background(chapter: Chapter):
                 raise Exception("Failed to download file from S3")
                 
             doc = fitz.open(file_path)
-            pages = list(np.arange(chapter.page_start-1, chapter.page_end-1))
-            doc.select(pages)
-            chapter_text = "\n".join([page.get_text() for page in doc])
-            
-            slides_data = await ai.generate_chapter_slides(chapter.title, chapter_text)
-            
-            if not slides_data:
-                return
-            
-            # Create slides
-            for i, slide_data in enumerate(slides_data):
-                # Generate voice for explanation
-                voice_filename = f"{uuid.uuid4()}_{slide_data.title[:20].replace(' ', '_')}.mp3"
-                wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
-                
-                is_upload = storage.upload_file(wav_base64, voice_filename)
-                if not is_upload:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to upload audio file to s3."
-                    )
 
-                # Create slide
-                slide = Slide(
-                    chapter_id=chapter.id,
-                    title=slide_data.title,
-                    points=slide_data.bullets,
-                    explanation=slide_data.explanation,
-                    voice_url=voice_filename,
-                    order_index=i
-                )
-                db.add(slide)
-            
-            await db.commit()
+            page_count = doc.page_count
+            start_page = chapter.page_start
+            if  start_page > page_count:
+                start_page = page_count-1
+            end_page = chapter.page_end
+            if end_page > page_count:
+                end_page = page_count
+
+
+            for page_no in range(chapter.page_start, chapter.page_end):
+                
+                page_text = doc.get_page_text(page_no)
+                slides_data = await ai.generate_slides(page_text)
+                
+                if not slides_data:
+                    return
+                
+                # Create slides
+                for i, slide_data in enumerate(slides_data):
+                    # Generate voice for explanation
+                    voice_filename = f"{uuid.uuid4()}_{slide_data.title[:20].replace(' ', '_')}.mp3"
+                    wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
+                    
+                    is_upload = storage.upload_file(wav_base64, voice_filename)
+                    if not is_upload:
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Failed to upload audio file to s3."
+                        )
+
+                    # Create slide
+                    slide = Slide(
+                        chapter_id=chapter.id,
+                        title=slide_data.title,
+                        points=slide_data.bullets,
+                        explanation=slide_data.explanation,
+                        voice_url=voice_filename,
+                        order_index=i
+                    )
+                    db.add(slide)
+                
+                await db.commit()
             
         except Exception as e:
             import traceback
@@ -145,3 +163,4 @@ async def generate_slides_background(chapter: Chapter):
         finally:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
+    print("generate slides background task completed.")
