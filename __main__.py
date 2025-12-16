@@ -11,6 +11,7 @@ load_dotenv(find_dotenv())
 DB_USERNAME = os.getenv("DB_USERNAME")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
+DEBUG = os.getenv("DEBUG")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 ACCESS_TOKEN_EXPIRE_DAYS = os.getenv("ACCESS_TOKEN_EXPIRE_DAYS")
@@ -31,7 +32,24 @@ vpc = aws.ec2.Vpc("lumina-vpc",
     tags={"Name": "lumina-vpc"}
 )
 
-# Create Subnets (simplified 2 AZ setup for HA)
+# Public Subnets (for NAT Gateway)
+public_subnet_a = aws.ec2.Subnet("public-subnet-a",
+    vpc_id=vpc.id,
+    cidr_block="10.0.10.0/24",
+    availability_zone="us-east-1a",
+    map_public_ip_on_launch=True,
+    tags={"Name": "lumina-public-subnet-a"}
+)
+
+public_subnet_b = aws.ec2.Subnet("public-subnet-b",
+    vpc_id=vpc.id,
+    cidr_block="10.0.11.0/24",
+    availability_zone="us-east-1b",
+    map_public_ip_on_launch=True,
+    tags={"Name": "lumina-public-subnet-b"}
+)
+
+# Private Subnets (for Lambda & RDS)
 subnet_a = aws.ec2.Subnet("subnet-a",
     vpc_id=vpc.id,
     cidr_block="10.0.1.0/24",
@@ -44,6 +62,65 @@ subnet_b = aws.ec2.Subnet("subnet-b",
     cidr_block="10.0.2.0/24",
     availability_zone="us-east-1b",
     tags={"Name": "lumina-subnet-b"}
+)
+
+# Internet Gateway
+igw = aws.ec2.InternetGateway("igw",
+    vpc_id=vpc.id,
+    tags={"Name": "lumina-igw"}
+)
+
+# Elastic IP for NAT Gateway
+eip = aws.ec2.Eip("nat-eip",
+    domain="vpc",
+    tags={"Name": "lumina-nat-eip"}
+)
+
+# NAT Gateway (for Lambda to access external APIs like Gemini)
+nat = aws.ec2.NatGateway("nat",
+    subnet_id=public_subnet_a.id,
+    allocation_id=eip.id,
+    tags={"Name": "lumina-nat"}
+)
+
+# Public Route Table
+public_rt = aws.ec2.RouteTable("public-rt",
+    vpc_id=vpc.id,
+    routes=[aws.ec2.RouteTableRouteArgs(
+        cidr_block="0.0.0.0/0",
+        gateway_id=igw.id
+    )],
+    tags={"Name": "lumina-public-rt"}
+)
+
+aws.ec2.RouteTableAssociation("public-rta-a",
+    subnet_id=public_subnet_a.id,
+    route_table_id=public_rt.id
+)
+
+aws.ec2.RouteTableAssociation("public-rta-b",
+    subnet_id=public_subnet_b.id,
+    route_table_id=public_rt.id
+)
+
+# Private Route Table (routes through NAT)
+private_rt = aws.ec2.RouteTable("private-rt",
+    vpc_id=vpc.id,
+    routes=[aws.ec2.RouteTableRouteArgs(
+        cidr_block="0.0.0.0/0",
+        nat_gateway_id=nat.id
+    )],
+    tags={"Name": "lumina-private-rt"}
+)
+
+aws.ec2.RouteTableAssociation("private-rta-a",
+    subnet_id=subnet_a.id,
+    route_table_id=private_rt.id
+)
+
+aws.ec2.RouteTableAssociation("private-rta-b",
+    subnet_id=subnet_b.id,
+    route_table_id=private_rt.id
 )
 
 db_subnet_group = aws.rds.SubnetGroup("db-subnet-group",
@@ -117,8 +194,8 @@ repo = aws.ecr.Repository("lumina-repo", force_delete=True)
 image = docker.Image("lambda-image",
     image_name=repo.repository_url,
     build=docker.DockerBuildArgs(
-        context="../",            # Must be root to access uv.lock & pyproject.toml
-        dockerfile="../Dockerfile", # Ensure Dockerfile is at the root
+        context="./",            # Must be root to access uv.lock & pyproject.toml
+        dockerfile="./Dockerfile", # Ensure Dockerfile is at the root
         platform="linux/amd64",
         args={"DOCKER_BUILDKIT": "1"} 
     ),
@@ -168,13 +245,15 @@ db_url = pulumi.Output.all(
     aurora.endpoint, 
     aurora.port, 
     aurora.database_name
-).apply(lambda args: f"postgresql://{args[0]}:{args[1]}@{args[2]}:{args[3]}/{args[4]}")
+).apply(lambda args: f"postgresql+asyncpg://{args[0]}:{args[1]}@{args[2]}:{args[3]}/{args[4]}")
 
 fn = aws.lambda_.Function("lumina-lambda",
     package_type="Image",
     image_uri=image.repo_digest,
     role=lambda_role.arn,
     timeout=60,
+    memory_size=1024, 
+    reserved_concurrent_executions=1,
     vpc_config=aws.lambda_.FunctionVpcConfigArgs(
         security_group_ids=[lambda_sg.id],
         subnet_ids=[subnet_a.id, subnet_b.id]
@@ -199,69 +278,19 @@ fn = aws.lambda_.Function("lumina-lambda",
 )
 
 # ==================================================================================
-# 6. API GATEWAY (With Rate Limiting)
+# 6. LAMBDA FUNCTION URL
 # ==================================================================================
-api = aws.apigateway.RestApi("lumina-api", description="lumina Education API")
-
-resource = aws.apigateway.Resource("api-resource",
-    rest_api=api.id,
-    parent_id=api.root_resource_id,
-    path_part="v1"
-)
-
-method = aws.apigateway.Method("api-method",
-    rest_api=api.id,
-    resource_id=resource.id,
-    http_method="POST",
-    authorization="NONE"
-)
-
-integration = aws.apigateway.Integration("api-integration",
-    rest_api=api.id,
-    resource_id=resource.id,
-    http_method=method.http_method,
-    integration_http_method="POST",
-    type="AWS_PROXY",
-    uri=fn.invoke_arn
-)
-
-# Permit API Gateway to invoke Lambda
-lambda_permission = aws.lambda_.Permission("api-gateway-permission",
-    action="lambda:InvokeFunction",
-    function=fn.name,
-    principal="apigateway.amazonaws.com",
-    source_arn=api.execution_arn.apply(lambda arn: f"{arn}/*/*")
-)
-
-deployment = aws.apigateway.Deployment("api-deployment",
-    rest_api=api.id,
-    # Trigger redeployment when integration changes
-    triggers={"redeployment": pulumi.Output.all(integration.id).apply(json.dumps)},
-    opts=pulumi.ResourceOptions(depends_on=[method])
-)
-
-stage = aws.apigateway.Stage("api-stage",
-    deployment=deployment.id,
-    rest_api=api.id,
-    stage_name="prod"
-)
-
-# Rate Limiting: 10 requests per minute
-usage_plan = aws.apigateway.UsagePlan("usage-plan",
-    name="lumina-usage-plan-low",
-    description="Limit to 10 requests per minute",
-    api_stages=[aws.apigateway.UsagePlanApiStageArgs(
-        api_id=api.id,
-        stage=stage.stage_name,
-    )],
-    quota_settings=aws.apigateway.UsagePlanQuotaSettingsArgs(
-        limit=100,
-        period="DAY",
-        offset=0
-    ),
-    throttle_settings=aws.apigateway.UsagePlanThrottleSettingsArgs(
-        burst_limit=5,
-        rate_limit=1000.0 / 86400.0 # requests per second 
+# Create a publicly accessible Function URL. 
+# We use auth_type="NONE" because CloudFront will front this connection.
+# Note: In a stricter environment, we might use IAM auth and sign requests with CloudFront.
+func_url = aws.lambda_.FunctionUrl("lumina-lambda-url",
+    function_name=fn.name,
+    authorization_type="NONE",
+    cors=aws.lambda_.FunctionUrlCorsArgs(
+        allow_origins=["https://slides.khaneducation.ai"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        max_age=86400
     )
 )
 
@@ -275,17 +304,17 @@ web_bucket = aws.s3.Bucket("lumina-slides-web",
 )
 
 frontend_build = command.local.Command("frontend-build",
-    create="cd ../web && npm run build",
+    create="cd web && npm run build",
     environment={
-        "VITE_API_URL": pulumi.Output.concat(stage.invoke_url)
+        "VITE_API_URL": pulumi.Output.concat(func_url.function_url,"api")
     }
 )
 
-synced_folder.S3BucketFolder("web-folder-sync",
+synced_web_folder= synced_folder.S3BucketFolder("web-folder-sync",
     acl="private", 
     bucket_name=web_bucket.bucket,
-    path="../web/dist",
-    managed_objects=False, # Fast, CLI-based sync
+    path="./web/dist",
+    managed_objects=True,
     opts=pulumi.ResourceOptions(depends_on=[frontend_build])
 )
 
@@ -355,14 +384,12 @@ distribution = aws.cloudfront.Distribution("web-distribution",
             cookies=aws.cloudfront.DistributionDefaultCacheBehaviorForwardedValuesCookiesArgs(forward="none")
         )
     ),
-    # --- FIXED SECTION START ---
     aliases=["slides.khaneducation.ai"],
     viewer_certificate=aws.cloudfront.DistributionViewerCertificateArgs(
         acm_certificate_arn=cert_validation.certificate_arn, # Use the VALIDATED cert ARN
         ssl_support_method="sni-only",
         minimum_protocol_version="TLSv1.2_2021" 
     ),
-    # --- FIXED SECTION END ---
     restrictions=aws.cloudfront.DistributionRestrictionsArgs(
         geo_restriction=aws.cloudfront.DistributionRestrictionsGeoRestrictionArgs(restriction_type="none")
     )
@@ -402,6 +429,6 @@ bucket_policy = aws.s3.BucketPolicy("web-bucket-policy",
 # ==================================================================================
 # EXPORTS
 # ==================================================================================
-pulumi.export("api_url", stage.invoke_url)
+pulumi.export("lambda_url", func_url.function_url)
 pulumi.export("aurora_endpoint", aurora.endpoint)
 pulumi.export("website_url", pulumi.Output.concat("https://", dns_record.name))

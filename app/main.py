@@ -32,7 +32,7 @@ app = FastAPI(
 # Set up CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else ["https://slides.khaneducation.ai/"], 
+    allow_origins=["*"] if settings.DEBUG else ["https://slides.khaneducation.ai"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
