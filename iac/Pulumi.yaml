@@ -1,0 +1,10 @@
+name: lumina
+description: deploying fastapi app on aws ecr+lambda and react web to s3+cloudfront
+runtime:
+  name: python
+  options:
+    toolchain: uv
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: python

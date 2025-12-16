@@ -6,7 +6,6 @@ import os
 from app.db import Subject, SubjectType, Chapter, Slide
 from app.db import AsyncSessionLocal
 from app.services import ai, storage
-import numpy as np 
 
 async def process_subject_background(subject_id: int, file_s3path:str ):
     """Background task to process uploaded subject"""

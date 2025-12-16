@@ -11,6 +11,8 @@ wheels/
 .env
 .ruff_cache/
 *.sqlite3
+.pytest_cache/
+
 # Logs
 logs
 *.log

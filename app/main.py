@@ -2,10 +2,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-
+from mangum import Mangum
 from app.api import auth, users, subjects, chapters, slides
 from app.db import engine, Base
 from logging import getLogger
+from app.config import settings
 logger = getLogger(__name__)
 
 @asynccontextmanager
@@ -31,7 +32,7 @@ app = FastAPI(
 # Set up CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure properly in production
+    allow_origins=["*"] if settings.DEBUG else ["https://slides.khaneducation.ai/"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,3 +52,5 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+handler = Mangum(app)
