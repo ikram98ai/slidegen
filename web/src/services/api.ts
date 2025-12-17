@@ -30,29 +30,32 @@ export const authApi = {
     });
     return response.data;
   },
-
-  me: async (): Promise<UserResponse> => {
-    const response = await api.get<UserResponse>(`/auth/me`);
-    return response.data;
-  },
 };
 
 export const usersApi = {
-  getUser: async (userId: number): Promise<UserResponse> => {
+  getUser: async (userId: string): Promise<UserResponse> => {
     const response = await api.get<UserResponse>(`/users/${userId}`);
     return response.data;
   },
+
+  getMe: async (): Promise<UserResponse> => {
+    const response = await api.get<UserResponse>(`/users/me`);
+    return response.data;
+  },
+
   updateUser: async (data: FormData): Promise<UserResponse> => {
     const response = await api.patch<UserResponse>(`/users/me`, data, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return response.data;
   },
+
   deleteUser: async (): Promise<void> => {
     await api.delete(`/users/me`);
   },
+
   getUserSubjects: async (
-    userId: number,
+    userId: string,
     skip = 0,
     limit = 100
   ): Promise<SubjectResponse[]> => {
@@ -68,16 +71,14 @@ export const usersApi = {
 
 export const subjectsApi = {
   listSubjects: async (skip = 0, limit = 100): Promise<SubjectResponse[]> => {
-    const response = await api.get<SubjectResponse[]>("/subjects/", {
+    const response = await api.get<SubjectResponse[]>("/subjects", {
       params: { skip, limit },
     });
     return response.data;
   },
 
-  getSubject: async (subjectId: number): Promise<SubjectResponse> => {
-    const response = await api.get<SubjectResponse>(
-      `/subjects/${subjectId}`
-    );
+  getSubject: async (subjectId: string): Promise<SubjectResponse> => {
+    const response = await api.get<SubjectResponse>(`/subjects/${subjectId}`);
     return response.data;
   },
   uploadSubject: async (formData: FormData): Promise<SubjectResponse> => {
@@ -91,7 +92,7 @@ export const subjectsApi = {
     return response.data;
   },
   getSubjectChapters: async (
-    subjectId: number
+    subjectId: string
   ): Promise<SubjectDetailResponse> => {
     const response = await api.get<SubjectDetailResponse>(
       `/subjects/${subjectId}/chapters`
@@ -99,7 +100,7 @@ export const subjectsApi = {
     return response.data;
   },
   updateSubject: async (
-    subjectId: number,
+    subjectId: string,
     data: SubjectUpdate
   ): Promise<SubjectResponse> => {
     const response = await api.patch<SubjectResponse>(
@@ -108,7 +109,7 @@ export const subjectsApi = {
     );
     return response.data;
   },
-  deleteSubject: async (subjectId: number): Promise<void> => {
+  deleteSubject: async (subjectId: string): Promise<void> => {
     await api.delete(`/subjects/${subjectId}`);
   },
 };
@@ -120,23 +121,32 @@ export const chaptersApi = {
   },
 
   updateChapter: async (
-    chapterId: number,
+    subjectId: string,
+    chapterId: string,
     data: ChapterUpdate
   ): Promise<ChapterResponse> => {
     const response = await api.patch<ChapterResponse>(
-      `/chapters/${chapterId}`,
+      `/chapters/${subjectId}/${chapterId}`,
       data
     );
     return response.data;
   },
 
-  deleteChapter: async (chapterId: number): Promise<void> => {
-    await api.delete(`/chapters/${chapterId}`);
+  deleteChapter: async (
+    subjectId: string,
+    chapterId: string
+  ): Promise<void> => {
+    await api.delete(`/chapters/${subjectId}/${chapterId}`);
   },
-  generateSlides: async (chapterId: number): Promise<void> => {
-    await api.post(`/chapters/${chapterId}/slides/generate`);
+  generateSlides: async (
+    subjectId: string,
+    chapterId: string
+  ): Promise<void> => {
+    await api.post(`/chapters/${subjectId}/${chapterId}/slides/generate`);
   },
-  getChapterSlides: async (chapterId: number): Promise<SlideResponse[]> => {
+  getChapterSlides: async (
+    chapterId: string
+  ): Promise<SlideResponse[]> => {
     const response = await api.get<SlideResponse[]>(
       `/chapters/${chapterId}/slides`
     );
@@ -146,16 +156,17 @@ export const chaptersApi = {
 
 export const slidesApi = {
   updateSlide: async (
-    slideId: number,
+    chapterId: string,
+    slideId: string,
     data: SlideUpdate
   ): Promise<SlideResponse> => {
-    const response = await api.patch<SlideResponse>(
-      `/slides/${slideId}`,
-      data
-    );
+    const response = await api.patch<SlideResponse>(`/chpaters/${chapterId}/slides/${slideId}`, data);
     return response.data;
   },
-  deleteSlide: async (slideId: number): Promise<void> => {
-    await api.delete(`/slides/${slideId}`);
+  deleteSlide: async (
+    chapterId: string,
+    slideId: string
+  ): Promise<void> => {
+    await api.delete(`/chpaters/${chapterId}/slides/${slideId}`);
   },
 };

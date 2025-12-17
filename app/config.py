@@ -2,13 +2,13 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
 
-class Settings(BaseSettings):
 
+class Settings(BaseSettings):
     # AWS
-    AWS_ACCESS_KEY_ID: Optional[str] = None  
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None  
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_REGION: Optional[str] = "us-east-1"
-    S3_BUCKET_NAME: str  
+    S3_BUCKET_NAME: str
 
     # Security
     DEBUG: bool = True
@@ -16,18 +16,15 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_DAYS: int = 7
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
-    
-    # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./lumina.sqlite3"
-    
+
     # AI Services
-    GEMINI_API_KEY: Optional[str] 
+    GEMINI_API_KEY: Optional[str]
     TEXT_MODEL: str = "gemini-2.5-flash"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
 
-    
     class Config:
         env_file = ".env"
-        extra='allow' 
+        extra = "allow"
+
 
 settings = Settings()

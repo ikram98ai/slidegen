@@ -17,12 +17,14 @@ import {
 import { useUpdateSlide } from "../hooks/useAppQueries";
 
 interface SlideCardProps {
+  chapterId:string,
   slide: SlideResponse;
   index: number;
   total: number;
 }
 
 export const SlideCard: React.FC<SlideCardProps> = ({
+  chapterId,
   slide,
   index,
   total,
@@ -128,6 +130,7 @@ export const SlideCard: React.FC<SlideCardProps> = ({
 
     updateSlideMutation.mutate(
       {
+        chapterId: chapterId,
         slideId: slide.id,
         slide: updatedSlide,
       },

@@ -66,7 +66,7 @@ export const useSubjects = () => {
   });
 };
 
-export const useSubject = (subjectId: number | null) => {
+export const useSubject = (subjectId: string | undefined) => {
   return useQuery<SubjectResponse | null>({
     queryKey: ["subjects"],
     queryFn: async () => {
@@ -76,7 +76,7 @@ export const useSubject = (subjectId: number | null) => {
     },
   });
 };
-export const useUserSubjects = (userId: number | undefined) => {
+export const useUserSubjects = (userId: string | undefined) => {
   return useQuery<SubjectResponse[]>({
     queryKey: ["userSubjects", userId],
     queryFn: async () => {
@@ -88,7 +88,7 @@ export const useUserSubjects = (userId: number | undefined) => {
   });
 };
 
-export const useSubjectChapters = (subjectId: number | null) => {
+export const useSubjectChapters = (subjectId: string | undefined) => {
   return useQuery<SubjectDetailResponse | null>({
     queryKey: ["subject", subjectId],
     queryFn: async () => {
@@ -127,7 +127,7 @@ export const useUpdateSubject = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payload: {
-      id: number;
+      id: string;
       data: { title?: string; is_public?: boolean };
     }) => {
       return await subjectsApi.updateSubject(payload.id, payload.data);
@@ -141,7 +141,7 @@ export const useUpdateSubject = () => {
 export const useDeleteSubject = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       return await subjectsApi.deleteSubject(id);
     },
     onSuccess: () => {
@@ -150,7 +150,7 @@ export const useDeleteSubject = () => {
   });
 };
 
-export const useChapterSlides = (chapterId: number) => {
+export const useChapterSlides = (chapterId: string) => {
   return useQuery<SlideResponse[]>({
     queryKey: ["chapters", chapterId],
     queryFn: async () => {
@@ -165,10 +165,18 @@ export const useChapterSlides = (chapterId: number) => {
 
 export const useUpdateSlide = () => {
   return useMutation({
-    mutationFn: async (payload: { slideId: number; slide: SlideUpdate }) => {
-      if (!payload.slideId) throw new Error("Slide ID is missing");
+    mutationFn: async (payload: {
+      chapterId: string;
+      slideId: string;
+      slide: SlideUpdate;
+    }) => {
+      if (!payload.chapterId)
+        throw new Error("Chapter ID is missing");
 
-      return await slidesApi.updateSlide(payload.slideId, {
+      if (!payload.slideId)
+        throw new Error("Slide ID is missing");
+
+      return await slidesApi.updateSlide(payload.chapterId, payload.slideId, {
         title: payload.slide.title,
         points: payload.slide.points,
         explanation: payload.slide.explanation,

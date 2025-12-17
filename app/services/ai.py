@@ -7,11 +7,11 @@ from langchain.chat_models import init_chat_model
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
-MODEL_NAME = 'google_genai:gemini-2.0-flash'
-TTS_MODEL_NAME = 'google_genai:gemini-2.5-flash-preview-tts'
+MODEL_NAME = "google_genai:gemini-2.0-flash"
+TTS_MODEL_NAME = "google_genai:gemini-2.5-flash-preview-tts"
 
 llm = init_chat_model(model=MODEL_NAME, api_key=settings.GEMINI_API_KEY)
-tts = init_chat_model(model=TTS_MODEL_NAME, api_key=settings.GEMINI_API_KEY) 
+tts = init_chat_model(model=TTS_MODEL_NAME, api_key=settings.GEMINI_API_KEY)
 
 
 # --- MAIN SERVICES ---
@@ -38,12 +38,11 @@ async def analyze_book_toc(toc: str) -> List[ChapterData]:
 
     try:
         analyze_toc = llm.with_structured_output(Chapters)
-        response = await analyze_toc.ainvoke(prompt) 
+        response = await analyze_toc.ainvoke(prompt)
         return response.chapters
     except Exception as error:
         print(f"Book analysis failed: {error}")
         raise Exception("Failed to analyze book structure.")
-
 
 
 class SlideData(BaseModel):
@@ -53,7 +52,7 @@ class SlideData(BaseModel):
 
 class Slides(BaseModel):
     slides: List[SlideData]
-    
+
 async def generate_slides(page_text: str) -> List[SlideData]:
     prompt = f"""
     You are an expert presentation designer.
@@ -70,7 +69,6 @@ async def generate_slides(page_text: str) -> List[SlideData]:
     except Exception as error:
         print(f"Chapter slide generation failed: {error}")
         raise Exception("Failed to generate slides for chapter.")
-
 
 
 async def generate_slide_audio(text: str) -> str:

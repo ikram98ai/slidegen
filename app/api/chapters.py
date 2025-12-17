@@ -1,162 +1,186 @@
 # app/api/v1/endpoints/chapters.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from app.db import get_db, User, Subject, Chapter, Slide
+import uuid
+from app.models import User, Subject, Chapter, Slide
 from app.schemas import ChapterCreate, ChapterUpdate, ChapterResponse, SlideResponse
-from app.api.deps import get_current_user
+from app.schemas import SlideUpdate, SlideResponse
+from app.services.auth import get_current_user
 from app.services import bg_tasks
 
 router = APIRouter()
 
 
 @router.post("/", response_model=ChapterResponse)
-async def create_chapter(
-    chapter: ChapterCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(get_current_user)):
     """Create chapter - only owner of the subject"""
     # Get subject
-    result = await db.execute(
-        select(Subject).where(Subject.id == chapter.subject_id)
-    )
-    subject = result.scalar_one_or_none()
-    
-    if not subject:
-        raise HTTPException(status_code=404, detail="Subject not found to create chapter for")
-    
-    # Check ownership
-    if current_user.id != subject.user_id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    
+    try:
+        subject = Subject.get(chapter.subject_id)
+    except Subject.DoesNotExist:
+        raise HTTPException(
+            status_code=404, detail="Subject not found to create chapter for"
+        )
+
     # Create chapter
-    db_chapter = Chapter(subject_id=chapter.subject_id, 
-                         title=chapter.title, 
-                         page_start=chapter.page_start, 
-                         page_end=chapter.page_end,
-                         order_index=chapter.order_index)
-    
-    db.add(db_chapter)
-    await db.commit()
-    await db.refresh(db_chapter)
-    
+    db_chapter = Chapter(
+        id=str(uuid.uuid4()),
+        user_id=subject.user_id,
+        subject_id=subject.id,
+        title=chapter.title,
+        page_start=chapter.page_start,
+        page_end=chapter.page_end,
+        order_index=chapter.order_index,
+    )
+
+    db_chapter.save()
+
     return db_chapter
 
-@router.patch("/{chapter_id}", response_model=ChapterResponse)
+
+@router.patch("/{subject_id}/{chapter_id}", response_model=ChapterResponse)
 async def update_chapter(
-    chapter_id: int,
+    subject_id: str,
+    chapter_id: str,
     chapter_update: ChapterUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Update chapter - only owner"""
-    # Get chapter with subject
-    result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.subject))
-        .where(Chapter.id == chapter_id)
-    )
-    chapter = result.scalar_one_or_none()
-    
-    if not chapter:
+    # Get subject for ownership check
+    try:
+        subject = Subject.get(subject_id)
+    except Subject.DoesNotExist:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    # Get chapter
+    try:
+        chapter = Chapter.get(subject_id, chapter_id)
+    except Chapter.DoesNotExist:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    
-    # Check ownership
-    if current_user.id != chapter.subject.user_id:
+
+    if current_user.id != subject.user_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    
+
     # Update chapter
-    update_data = chapter_update.dict(exclude_unset=True)
+    update_data = chapter_update.model_dump(exclude_unset=True)
+    actions = []
     for field, value in update_data.items():
         setattr(chapter, field, value)
-    
-    db.add(chapter)
-    await db.commit()
-    await db.refresh(chapter)
-    
+        actions.append(getattr(Chapter, field).set(value))
+
+    if actions:
+        chapter.update(actions=actions)
+
     return chapter
 
-@router.delete("/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
+
+@router.delete("/{subject_id}/{chapter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chapter(
-    chapter_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    subject_id:str, chapter_id: str, current_user: User = Depends(get_current_user)
 ):
     """Delete chapter - only owner"""
-    # Get chapter with subject
-    result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.subject))
-        .where(Chapter.id == chapter_id)
-    )
-    chapter = result.scalar_one_or_none()
-    
-    if not chapter:
+    # Get chapter
+    try:
+        chapter = Chapter.get(subject_id, chapter_id)
+    except Chapter.DoesNotExist:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    
-    # Check ownership
-    if current_user.id != chapter.subject.user_id:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    
-    # Delete chapter (cascade will delete slides)
-    await db.delete(chapter)
-    await db.commit()
-    
 
-@router.post("/{chapter_id}/slides/generate", status_code=status.HTTP_202_ACCEPTED)
+
+    # Check ownership
+    if current_user.id != chapter.user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    # Delete slides in the chapter
+    slides = Slide.query(Slide.chapter_id)
+    with Slide.batch_write() as batch:
+        for slide in slides:
+            batch.delete(slide)
+
+    # Delete chapter
+    chapter.delete()
+
+
+@router.post("/{subject_id}/{chapter_id}/slides/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate_slides(
-    chapter_id: int,
+    subject_id: str,
+    chapter_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Generate slides for a chapter (AI)"""
-    # Get chapter with subject
-    result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.subject))
-        .where(Chapter.id == chapter_id)
-    )
-    chapter = result.scalar_one_or_none()
-    
-    if not chapter:
+
+    # Get chapter
+    try:
+        chapter = Chapter.get(subject_id, chapter_id)
+    except Chapter.DoesNotExist:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    
+
+
     # Check ownership
-    if current_user.id != chapter.subject.user_id:
+    if current_user.id != chapter.user_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
-    
+
     # Start background task
-    background_tasks.add_task(bg_tasks.generate_slides_background, chapter)
-    
+    background_tasks.add_task(bg_tasks.generate_slides_background, current_user.id, subject_id, chapter)
+
     return {"message": "Slide generation started"}
 
+
 @router.get("/{chapter_id}/slides", response_model=List[SlideResponse])
-async def get_chapter_slides(
-    chapter_id: int,
-    db: AsyncSession = Depends(get_db),
-):
+async def get_chapter_slides(chapter_id: str):
     """Get all slides for a chapter"""
-    # Get chapter with subject
-    result = await db.execute(
-        select(Chapter)
-        .options(selectinload(Chapter.subject))
-        .where(Chapter.id == chapter_id)
-    )
-    chapter = result.scalar_one_or_none()
-    
-    if not chapter:
-        raise HTTPException(status_code=404, detail="Chapter not found")
 
     # Get slides
-    result = await db.execute(
-        select(Slide)
-        .where(Slide.chapter_id == chapter_id)
-        .order_by(Slide.order_index)
-    )
-    slides = result.scalars().all()
-    
+    slides = Slide.query(chapter_id)
+    slides = sorted(slides, key=lambda s: s.order_index)
+
     return slides
+
+
+
+@router.patch("/{chpater_id}/slides/{slide_id}", response_model=SlideResponse)
+async def update_slide(
+    chapter_id: str,
+    slide_id: str,
+    slide_update: SlideUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """Update slide - only owner"""
+    # Get slide
+    try:
+        slide = Slide.get(chapter_id, slide_id)
+    except Slide.DoesNotExist:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    # Check ownership
+    if current_user.id != slide.user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    # Update slide
+    update_data = slide_update.model_dump(exclude_unset=True)
+    actions = []
+    for field, value in update_data.items():
+        setattr(slide, field, value)
+        actions.append(getattr(Slide, field).set(value))
+
+    if actions:
+        slide.update(actions=actions)
+
+    return slide
+
+
+@router.delete("/{chapter_id}/slides/{slide_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_slide(chapter_id:str, slide_id: str, current_user: User = Depends(get_current_user)):
+    """Delete slide - only owner"""
+
+    # Get slide
+    try:
+        slide = Slide.get(chapter_id, slide_id)
+    except Slide.DoesNotExist:
+        raise HTTPException(status_code=404, detail="Slide not found")
+
+    if current_user.id != slide.user_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    # Delete slide
+    slide.delete()
+

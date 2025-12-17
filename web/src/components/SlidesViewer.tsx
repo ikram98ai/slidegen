@@ -9,21 +9,22 @@ interface SlidesViewerProps {
   viewMode: "vertical" | "horizontal";
   currentHorizontalIndex: number;
   setCurrentHorizontalIndex: (index: number) => void;
-  chapterId: number;
+  subjectId: string;
+  chapterId: string;
 }
 
 export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   viewMode,
   currentHorizontalIndex,
   setCurrentHorizontalIndex,
+  subjectId,
   chapterId,
 }) => {
   const { data: slides } = useChapterSlides(chapterId);
 
   const generateSlidesForActiveChapter = async () => {
-    if (isNaN(chapterId)) return;
     try {
-      await chaptersApi.generateSlides(chapterId);
+      await chaptersApi.generateSlides(subjectId, chapterId);
       alert("Slides generation started. Please check back in a few moments.");
     } catch {
       alert("Failed to start slides generation.");
@@ -36,6 +37,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
         {slides?.map((slide, idx) => (
           <SlideCard
             key={idx}
+            chapterId={chapterId}
             slide={slide}
             index={idx}
             total={slides.length}
@@ -65,6 +67,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
         <div className="w-full max-w-4xl min-h-[500px] relative">
           <SlideCard
             key={currentSlide.id ?? currentHorizontalIndex}
+            chapterId={chapterId}
             slide={currentSlide}
             index={currentHorizontalIndex}
             total={slides.length}

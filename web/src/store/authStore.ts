@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { UserResponse } from "../types";
-import { authApi } from "../services/api";
+import { authApi, usersApi } from "../services/api";
 
 interface AuthState {
   user: UserResponse | null;
@@ -36,7 +36,7 @@ export const useAuthStore = create<AuthState>()(
           localStorage.setItem("access_token", access_token);
           localStorage.setItem("refresh_token", refresh_token);
 
-          const user = await authApi.me();
+          const user = await usersApi.getMe();
           set({ isAuthenticated: true, token: access_token, user: user });
 
           // Fetch user details immediately after login

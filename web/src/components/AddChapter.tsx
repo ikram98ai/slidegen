@@ -6,7 +6,7 @@ import { type ChapterCreate } from "../types";
 import { chaptersApi } from "../services/api";
 
 interface AddChapterProps {
-  subjectId: number;
+  subjectId: string;
 
   isCreating: boolean;
   onSetIsCreating: (creating: boolean) => void;

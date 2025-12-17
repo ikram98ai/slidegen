@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useAuthStore } from "../store/authStore";
 import { usersApi } from "../services/api";
 import { Button } from "../components/ui/Button";
-import { User, Mail, Save, Upload, Pencil } from "lucide-react";
+import { User, Save, Upload, Pencil } from "lucide-react";
 import { useUserSubjects } from "../hooks/useAppQueries";
 import { useNavigate } from "react-router-dom";
 import { SubjectList } from "../components/SubjectList";
@@ -14,7 +14,6 @@ export const ProfilePage: React.FC = () => {
 
   const { user, updateUser } = useAuthStore();
   const [name, setName] = useState(user?.full_name || "");
-  const [email, setEmail] = useState(user?.email || "");
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{
@@ -31,7 +30,6 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     if (user) {
       setName(user.full_name);
-      setEmail(user.email);
     }
   }, [user]);
 
@@ -55,7 +53,6 @@ export const ProfilePage: React.FC = () => {
       const updateData: Record<string, string> = {};
 
       if (name !== user.full_name) updateData.full_name = name;
-      if (email !== user.email) updateData.email = email;
 
       if (selectedFile) {
         formData.append("dp", selectedFile);
@@ -176,23 +173,6 @@ export const ProfilePage: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={20}
-                />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
-                />
-              </div>
-            </div>
 
             {message && (
               <div

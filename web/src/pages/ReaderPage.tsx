@@ -16,7 +16,7 @@ export const ReaderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
   const navigate = useNavigate();
-  const { data: subject } = useSubjectChapters(id ? parseInt(id) : null);
+  const { data: subject } = useSubjectChapters(id);
 
   const [activeViewerChapter, setActiveViewerChapter] =
     useState<ChapterResponse>();
@@ -30,7 +30,6 @@ export const ReaderPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    resetViewer();
     return () => resetViewer();
   }, [id, resetViewer]);
 
@@ -103,6 +102,7 @@ export const ReaderPage: React.FC = () => {
                   viewMode={viewMode}
                   currentHorizontalIndex={currentHorizontalIndex}
                   setCurrentHorizontalIndex={setCurrentHorizontalIndex}
+                  subjectId={subject.id}
                   chapterId={activeViewerChapter?.id}
                 />
               )}

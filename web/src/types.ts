@@ -27,14 +27,13 @@ export interface UserCreate {
 
 export interface UserUpdate {
   full_name?: string | null;
-  email?: string | null;
   dp?: string | null;
 }
 
 export interface UserResponse {
   full_name: string;
   email: string;
-  id: number;
+  id: string;
   dp: string;
   is_active: boolean;
 }
@@ -49,8 +48,8 @@ export interface SubjectResponse {
   title: string;
   is_public: boolean;
   type: DocType;
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   file_path: string;
   processing_status: string;
   created_at: string;
@@ -61,8 +60,8 @@ export interface SubjectDetailResponse {
   title: string;
   is_public: boolean;
   type: DocType;
-  id: number;
-  user_id: number;
+  id: string;
+  user_id: string;
   file_path: string;
   processing_status: string;
   chapters?: ChapterResponse[];
@@ -80,14 +79,14 @@ export interface ChapterResponse {
   page_start: number;
   page_end: number;
   order_index: number;
-  id: number;
-  subject_id: number;
+  id: string;
+  subject_id: string;
   created_at: string;
   updated_at?: string | null;
 }
 
 export interface ChapterCreate {
-  subject_id:number
+  subject_id: string;
   title: string;
   page_start: number;
   page_end: number;
@@ -106,15 +105,14 @@ export interface SlideResponse {
   points: string[];
   explanation: string;
   order_index: number;
-  id: number;
-  chapter_id: number;
+  id: string;
+  chapter_id: string;
   voice_url?: string | null;
   created_at: string;
   updated_at?: string | null;
 }
 
 export interface SlideUpdate {
-  id?: number;
   title?: string | null;
   points?: string[] | null;
   explanation?: string | null;
