@@ -2,7 +2,7 @@ import boto3
 from botocore.exceptions import ClientError
 from app.config import settings
 import logging
-import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,8 @@ def upload_file(file, object_name):
 
 def download_file(object_name):
     """Download a file from an S3 bucket"""
-    file_path = object_name.split("/")[-1]
+    file_name = object_name.split("/")[-1]
+    file_path = os.path.join("/tmp", file_name)
     try:
         with open(file_path, "wb") as f:
             s3_client.download_fileobj(settings.S3_BUCKET_NAME, object_name, f)

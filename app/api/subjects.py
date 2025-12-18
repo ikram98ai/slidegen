@@ -176,16 +176,18 @@ async def delete_subject(subject_id: str, current_user: User = Depends(get_curre
     # Check ownership
     if current_user.id != subject.user_id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
+    try:
+        # Delete chapters and slides
+        chapters = list(Chapter.query(subject_id))
+        with Chapter.batch_write() as ch_batch:
+            for chapter in chapters:
+                slides = list(Slide.query(chapter.id))
+                with Slide.batch_write() as batch:
+                    for slide in slides:
+                        batch.delete(slide)
+                ch_batch.delete(chapter)
+        subject.delete()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"server error: {str(e)}")
 
-    # Delete chapters and slides
-    chapters = Chapter.query(Chapter.subject_id)
-    with Chapter.batch_write() as ch_batch:
-        for chapter in chapters:
-            slides = Slide.query(Slide.chapter_id)
-            with Slide.batch_write() as batch:
-                for slide in slides:
-                    batch.delete(slide)
-            ch_batch.delete(chapter)
-
-    # Delete subject
-    subject.delete()
+    # Delete subjec

@@ -1,4 +1,3 @@
-from fastapi import HTTPException, status
 import fitz
 import uuid
 import os
@@ -26,16 +25,17 @@ async def process_subject_background(user_id: str, subject_id: str, file_s3path:
         if subject and subject.type == SubjectType.BOOK:
             toc_list = doc.get_toc()
             toc = ""
-            for item in toc_list:
-                level, title, page_num = item[0], item[1], item[2]
-                # Use indentation based on the hierarchy level (lvl - 1)
-                indent = "  " * (level - 1)
-                toc += f"{indent}- {title} (Page {page_num})\\n"
+            if toc_list:
+                for item in toc_list:
+                    level, title, page_num = item[0], item[1], item[2]
+                    # Use indentation based on the hierarchy level (lvl - 1)
+                    indent = "  " * (level - 1)
+                    toc += f"{indent}- {title} (Page {page_num})\\n"
 
-            chapters_data = await ai.analyze_book_toc(toc)
+                chapters_data = await ai.analyze_book_toc(toc)
 
-            # Save chapters
-            with Chapter.batch_write() as batch:
+                # Save chapters
+                # with Chapter.batch_write() as batch:
                 for i, chapter_data in enumerate(chapters_data):
                     chapter = Chapter(
                         id=str(uuid.uuid4()),
@@ -45,7 +45,20 @@ async def process_subject_background(user_id: str, subject_id: str, file_s3path:
                         page_end=chapter_data.page_end,
                         order_index=i,
                     )
-                    batch.save(chapter)
+                    chapter.save()
+                    # batch.save(chapter)
+            else:
+                chapter = Chapter(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    subject_id=subject_id,
+                    title="Only chapter of the book, because there is no table of content",
+                    page_start=0,
+                    page_end=doc.page_count,
+                    order_index=0,
+                )
+                chapter.save()
+
         else:
             # For reports, create a single chapter
             chapter = Chapter(
@@ -53,7 +66,7 @@ async def process_subject_background(user_id: str, subject_id: str, file_s3path:
                 user_id=user_id,
                 subject_id=subject_id,
                 title=subject.title + "'s Report",
-                page_start=1,
+                page_start=0,
                 page_end=doc.page_count,
                 order_index=0,
             )
@@ -109,17 +122,16 @@ async def generate_slides_background(user_id: str, subject_id, chapter: Chapter)
             # with Slide.batch_write() as batch:
             for i, slide_data in enumerate(slides_data):
                 # Generate voice for explanation
-                voice_filename = f"voices/{chapter.id}/{uuid.uuid4()}.mp3"
-                wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
-                wav_bytes = base64.b64decode(wav_base64)
-
-                is_upload = storage.upload_file(wav_bytes, voice_filename)
-                if not is_upload:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to upload audio file to s3.",
-                    )
-                voice_url = storage.get_public_url(voice_filename)
+                voice_url = None
+                try:
+                    voice_filename = f"voices/{chapter.id}/{uuid.uuid4()}.mp3"
+                    wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
+                    wav_bytes = base64.b64decode(wav_base64)
+                    storage.upload_file(wav_bytes, voice_filename)
+                    voice_url = storage.get_public_url(voice_filename)
+                except Exception:
+                    print(f"There is an error while generating voice for slide {slide_data.title} of chapter {chapter.id}")
+                    voice_url  = None
                 # Create slide
                 slide = Slide(
                     id=str(uuid.uuid4()),

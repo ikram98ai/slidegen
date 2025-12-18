@@ -42,7 +42,7 @@ async def analyze_book_toc(toc: str) -> List[ChapterData]:
         return response.chapters
     except Exception as error:
         print(f"Book analysis failed: {error}")
-        raise Exception("Failed to analyze book structure.")
+        return []
 
 
 class SlideData(BaseModel):
@@ -59,16 +59,15 @@ async def generate_slides(page_text: str) -> List[SlideData]:
     Create detailed educational presentation slides.
     Context for the slides: "{page_text}".
     """
-
+    print("generate_slides: input(page_text): ", page_text[:100])
     try:
         generate_slides = llm.with_structured_output(Slides)
         response = await generate_slides.ainvoke(prompt)
-
         return response.slides
 
     except Exception as error:
         print(f"Chapter slide generation failed: {error}")
-        raise Exception("Failed to generate slides for chapter.")
+        return []
 
 
 async def generate_slide_audio(text: str) -> str:

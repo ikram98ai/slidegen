@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from app.api import auth, users, subjects, chapters
+from app.config import settings
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -13,7 +14,7 @@ app = FastAPI(title="lumina", openapi_url="/openapi.json")
 # Set up CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if settings.DEBUG else [],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 import uuid
 from app.models import User, Subject, Chapter, Slide
 from app.schemas import ChapterCreate, ChapterUpdate, ChapterResponse, SlideResponse
-from app.schemas import SlideUpdate, SlideResponse
+from app.schemas import SlideUpdate
 from app.services.auth import get_current_user
 from app.services import bg_tasks
 from app.services.storage import get_presigned_url

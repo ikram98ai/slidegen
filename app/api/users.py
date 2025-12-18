@@ -16,14 +16,14 @@ from app.services import storage
 from app.models import Subject, User
 from app.schemas import UserResponse, UserUpdate, SubjectResponse
 from app.services.auth import get_current_user, get_current_user_or_anonymous
+from app.services.storage import get_presigned_url
 
 router = APIRouter()
 
-from app.services.storage import get_presigned_url
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_user(current_user: User = Depends(get_current_user)):
+async def get_myprofile(current_user: User = Depends(get_current_user)):
     if current_user.dp:
         current_user.dp = get_presigned_url(current_user.dp)
     return current_user

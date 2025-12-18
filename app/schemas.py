@@ -90,7 +90,7 @@ class SubjectDetailResponse(SubjectInDB):
 
 class ChapterBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
-    page_start: int = Field(..., ge=1)
+    page_start: int = Field(..., ge=0)
     page_end: int = Field(..., ge=1)
     order_index: int = Field(..., ge=0)
 
@@ -101,7 +101,7 @@ class ChapterCreate(ChapterBase):
 
 class ChapterUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
-    page_start: Optional[int] = Field(None, ge=1)
+    page_start: Optional[int] = Field(None, ge=0)
     page_end: Optional[int] = Field(None, ge=1)
     order_index: Optional[int] = Field(None, ge=0)
 

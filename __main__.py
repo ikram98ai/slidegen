@@ -3,7 +3,9 @@ import pulumi_aws as aws
 import pulumi_docker as docker
 import pulumi_command as command
 import pulumi_synced_folder as synced_folder
-import json, os, time
+import json
+import os
+import time
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
