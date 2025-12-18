@@ -19,8 +19,13 @@ from app.services.auth import get_current_user, get_current_user_or_anonymous
 
 router = APIRouter()
 
+from app.services.storage import get_presigned_url
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_user(current_user: User = Depends(get_current_user)):
+    if current_user.dp:
+        current_user.dp = get_presigned_url(current_user.dp)
     return current_user
 
 
@@ -36,6 +41,8 @@ async def get_user(user_id: str):
     if not user.is_active:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if user.dp:
+        user.dp = get_presigned_url(user.dp)
     return user
 
 
@@ -92,13 +99,14 @@ async def update_user(
         )
         is_upload = storage.upload_file(avatar_content, avatar_key)
         if is_upload:
-            avatar_url = storage.get_public_url(avatar_key)
-            update_data["dp"] = avatar_url
+            update_data["dp"] = avatar_key
 
     for field, value in update_data.items():
         setattr(current_user, field, value)
 
     current_user.save()
+    if current_user.dp:
+        current_user.dp = get_presigned_url(current_user.dp)
     return current_user
 
 

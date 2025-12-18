@@ -7,6 +7,7 @@ from app.schemas import ChapterCreate, ChapterUpdate, ChapterResponse, SlideResp
 from app.schemas import SlideUpdate, SlideResponse
 from app.services.auth import get_current_user
 from app.services import bg_tasks
+from app.services.storage import get_presigned_url
 
 router = APIRouter()
 
@@ -25,7 +26,7 @@ async def create_chapter(chapter: ChapterCreate, current_user: User = Depends(ge
     # Create chapter
     db_chapter = Chapter(
         id=str(uuid.uuid4()),
-        user_id=subject.user_id,
+        user_id=current_user.id,
         subject_id=subject.id,
         title=chapter.title,
         page_start=chapter.page_start,
@@ -132,6 +133,12 @@ async def get_chapter_slides(chapter_id: str):
     # Get slides
     slides = Slide.query(chapter_id)
     slides = sorted(slides, key=lambda s: s.order_index)
+    
+    # Generate presigned urls
+    for slide in slides:
+        if slide.voice_url:
+            slide.voice_url = get_presigned_url(slide.voice_url)
+
 
     return slides
 

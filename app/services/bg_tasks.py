@@ -9,9 +9,9 @@ from app.services import ai, storage
 
 async def process_subject_background(user_id: str, subject_id: str, file_s3path: str):
     """Background task to process uploaded subject"""
-    print("process subject background task started...")
     file_path = None
     subject = Subject.get(subject_id)
+    print(f"process subject background task started for subject {subject.title}:{subject.id}")
     try:
         # Update status to processing
         subject.update(actions=[Subject.processing_status.set("processing")])
@@ -68,19 +68,19 @@ async def process_subject_background(user_id: str, subject_id: str, file_s3path:
 
         import traceback
 
-        print(f"Error processing subject {subject_id}: {e}")
+        print(f"Error processing subject {subject.title}:{subject.id}: {e}")
         traceback.print_exc()
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
-    print("process subject background task completed.")
+    print(f"process subject background task completed for subject {subject.title}:{subject.id}.")
 
 
 async def generate_slides_background(user_id: str, subject_id, chapter: Chapter):
     """Background task to generate slides"""
 
-    print("generate slides background task started...")
+    print(f"generate slides background task started for chapter: {chapter.title}:{chapter.id}.")
     file_path = None
     try:
         subject = Subject.get(subject_id)
@@ -105,40 +105,41 @@ async def generate_slides_background(user_id: str, subject_id, chapter: Chapter)
             if not slides_data:
                 return
 
-            # Create slides
-            with Slide.batch_write() as batch:
-                for i, slide_data in enumerate(slides_data):
-                    # Generate voice for explanation
-                    voice_filename = f"voices/{chapter.id}/{uuid.uuid4()}.mp3"
-                    wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
-                    wav_bytes = base64.b64decode(wav_base64)
+            # # Create slides
+            # with Slide.batch_write() as batch:
+            for i, slide_data in enumerate(slides_data):
+                # Generate voice for explanation
+                voice_filename = f"voices/{chapter.id}/{uuid.uuid4()}.mp3"
+                wav_base64 = await ai.generate_slide_audio(slide_data.explanation)
+                wav_bytes = base64.b64decode(wav_base64)
 
-                    is_upload = storage.upload_file(wav_bytes, voice_filename)
-                    if not is_upload:
-                        raise HTTPException(
-                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Failed to upload audio file to s3.",
-                        )
-                    voice_url = storage.get_public_url(voice_filename)
-                    # Create slide
-                    slide = Slide(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        chapter_id=chapter.id,
-                        title=slide_data.title,
-                        points=slide_data.bullets,
-                        explanation=slide_data.explanation,
-                        voice_url=voice_url,
-                        order_index=i,
+                is_upload = storage.upload_file(wav_bytes, voice_filename)
+                if not is_upload:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to upload audio file to s3.",
                     )
-                    batch.save(slide)
+                voice_url = storage.get_public_url(voice_filename)
+                # Create slide
+                slide = Slide(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    chapter_id=chapter.id,
+                    title=slide_data.title,
+                    points=slide_data.bullets,
+                    explanation=slide_data.explanation,
+                    voice_url=voice_url,
+                    order_index=i,
+                )
+                slide.save()
+                    # batch.save(slide)
 
     except Exception as e:
         import traceback
 
-        print(f"Error generating slides for chapter {chapter.id}: {e}")
+        print(f"Error generating slides for chapter {chapter.title}:{chapter.id}: {e}")
         traceback.print_exc()
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
-    print("generate slides background task completed.")
+    print(f"generate slides background task completed for chapter: {chapter.title}:{chapter.id}.")

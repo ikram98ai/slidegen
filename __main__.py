@@ -8,6 +8,7 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+
 DEBUG = os.getenv("DEBUG")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
@@ -19,9 +20,16 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TEXT_MODEL = os.getenv("TEXT_MODEL")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 
+
 # ==================================================================================
-# 1. ECR + LAMBDA FUNCTION 
+# 1. ECR + LAMBDA FUNCTION + S3
 # ==================================================================================
+lumina_files_bucket = aws.s3.Bucket(
+    "lumina-files", 
+    bucket=S3_BUCKET_NAME , 
+    acl="private", 
+    versioning=aws.s3.BucketVersioningArgs(enabled=True)
+)
 
 repo = aws.ecr.Repository("lumina-repo", force_delete=True)
 
@@ -85,6 +93,40 @@ aws.iam.RolePolicy(
     ),
 )
 
+# Custom policy for DynamoDB
+current_account_id = aws.get_caller_identity().account_id
+current_region = aws.get_region().name
+aws.iam.RolePolicy(
+    "lambda-dynamodb-policy",
+    role=lambda_role.id,
+    policy=pulumi.Output.all(current_account_id, current_region).apply(
+        lambda args: json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "dynamodb:GetItem",
+                            "dynamodb:PutItem",
+                            "dynamodb:UpdateItem",
+                            "dynamodb:DeleteItem",
+                            "dynamodb:Query",
+                            "dynamodb:Scan",
+                        ],
+                        "Resource": f"arn:aws:dynamodb:{args[1]}:{args[0]}:table/lumina*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": "dynamodb:Query",
+                        "Resource": f"arn:aws:dynamodb:{args[1]}:{args[0]}:table/lumina*/index/*",
+                    },
+                ],
+            }
+        )
+    ),
+)
+
 fn = aws.lambda_.Function(
     "lumina-lambda",
     package_type="Image",
@@ -138,11 +180,7 @@ frontend_build = command.local.Command(
     "frontend-build",
     create="cd web && npm install && npm run build",
     # Add triggers to force rebuild on every deployment
-    triggers=[
-        str(
-            time.time()
-        )  # Also triggers on every run (you can remove this if you only want source-based triggers)
-    ],
+    triggers=[str(time.time())],
     environment={"VITE_API_URL": func_url.function_url},
 )
 
@@ -151,7 +189,7 @@ synced_web_folder = synced_folder.S3BucketFolder(
     acl="private",
     bucket_name=web_bucket.bucket,
     path="./web/dist",
-    managed_objects=True,
+    managed_objects=False,
     opts=pulumi.ResourceOptions(depends_on=[frontend_build]),
 )
 
