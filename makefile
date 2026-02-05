@@ -11,10 +11,11 @@ fix:
 format:
 	uv run ruff format
 
-dev: 
+dev:
 	uv run fastapi dev app/main.py
-
-
+	
+dev-web:
+	cd web && npm run dev
 
 build:
 	@echo "Building Docker image..."
