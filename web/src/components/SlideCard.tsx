@@ -52,14 +52,12 @@ export const SlideCard: React.FC<SlideCardProps> = ({
   useEffect(() => {
     if (slide.voice_url) {
       if (!audioRef.current) {
-        audioRef.current = new Audio(
-          `data:audio/wav;base64,${slide.voice_url}`
-        );
+        audioRef.current = new Audio(slide.voice_url);
         audioRef.current.onended = () => {
           setIsPlaying(false);
         };
       } else {
-        audioRef.current.src = `data:audio/wav;base64,${slide.voice_url}`;
+        audioRef.current.src = slide.voice_url;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsPlaying(false);
       }

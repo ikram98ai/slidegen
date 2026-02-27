@@ -21,11 +21,8 @@ import { useAuthStore } from "../store/authStore";
 export const useLogin = () => {
   const login = useAuthStore((state) => state.login);
   return useMutation({
-    mutationFn: async (credentials: { email: string; password?: string }) => {
-      const formData = new URLSearchParams();
-      formData.append("username", credentials.email);
-      formData.append("password", credentials.password || "");
-      return await authApi.login(formData);
+    mutationFn: async (credentials: { email: string; password: string }) => {
+      return await authApi.login(credentials);
     },
     onSuccess: (_, variables) => {
       return login(variables.email, variables.password || "");

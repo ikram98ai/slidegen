@@ -1,96 +1,147 @@
-# Lumina - Project Documentation
+# Slidegen - Project Documentation
 
 ## Overview
-Lumina (deployed as `slides.khaneducation.ai`) is an educational platform designed to generate and manage educational content (slides/chapters) from uploaded files. It leverages Generative AI (Google Gemini) for content processing.
 
-## Architecture
+Slidegen is an advanced educational platform designed to generate and manage educational content (slides and chapters) from uploaded files. It leverages Rust for high-performance processing and Generative AI (Google Gemini) for intelligent content extraction and slide generation.
 
-### Backend (`app/`)
-- **Framework:** FastAPI (Python).
-- **Runtime:** AWS Lambda (containerized via Docker).
-- **Key Dependencies:** `fastapi`, `uv` (package manager), `mangum` (Lambda adapter), `google-generativeai` (implied).
+## Technology Stack
+
+### Backend (`src/`)
+
+- **Language:** Rust (2024 Edition)
+- **Framework:** [Axum](https://github.com/tokio-rs/axum)
+- **Runtime:**
+  - **Local:** Tokio (TCP Listener)
+  - **Cloud:** AWS Lambda ([lambda_http](https://github.com/awslabs/aws-lambda-rust-runtime))
+- **Documentation:** [Utoipa](https://github.com/juhakivekas/utoipa) for OpenAPI 3.0 generation and Swagger UI.
 - **Data Storage:**
-  - **Database:** AWS DynamoDB (Tables: `lumina*`).
-  - **File Storage:** AWS S3 (`lumina-files` bucket).
-- **AI Integration:** Google Gemini API.
+  - **Database:** AWS DynamoDB (Managed via `manage` CLI).
+  - **File Storage:** AWS S3 for subject files and generated assets.
+- **AI Integration:** Google Gemini.
 
 ### Frontend (`web/`)
-- **Framework:** React (Vite).
-- **Styling:** Tailwind CSS.
-- **State Management:** Zustand (inferred from store structure).
-- **Hosting:** AWS S3 bucket served via CloudFront CDN.
 
-### Infrastructure (`Pulumi.yaml`, `__main__.py`)
-- **IaC Tool:** Pulumi (Python).
-- **Stack:**
-  - **Compute:** AWS Lambda (Docker Image from ECR).
-  - **Frontend:** S3 + CloudFront + Route53 (Custom Domain: `slides.khaneducation.ai`).
-  - **Storage:** S3 (Files), DynamoDB (Data).
-  - **Security:** IAM Roles/Policies for Lambda (S3/DynamoDB access).
+- **Framework:** React + Vite
+- **Styling:** Vanilla CSS (Modern, premium aesthetics)
+- **Hosting:** S3 Static Web Hosting + CloudFront CDN.
+
+### Infrastructure & Deployment
+
+- **Deployment Strategy:** Custom Bash scripts using AWS CLI and `cargo-lambda`.
+- **Backend Context:** Zip-based Lambda deployment (no Docker required for Lambda).
+- **Security:** JWT-based Authentication, IAM OAC for CloudFront-to-S3 security.
+
+---
 
 ## Local Development
 
 ### Prerequisites
-- Python 3.x (with `uv` installed).
-- Node.js & npm.
-- Docker (optional, for container testing).
-- AWS CLI (configured if interacting with real AWS resources).
+
+- **Rust:** Latest stable version.
+- **Node.js & npm:** For frontend development.
+- **AWS CLI:** Configured with credentials.
+- **Cargo Lambda:** (Optional, for testing Lambda builds) `pip install cargo-lambda`.
 
 ### Environment Setup
+
 1. Copy `.env.example` to `.env` in the root directory.
 2. Fill in the required values:
    - `GEMINI_API_KEY`: Your Google Gemini API key.
-   - `SECRET_KEY`: A secure random string for JWT.
-   - AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`).
+   - `SECRET_KEY`: A secure random string for JWT (e.g., `openssl rand -base64 32`).
+   - `AWS_REGION`: Your target AWS region.
+   - `AWS_ACCOUNT_ID`: Your 12-digit AWS account ID.
+   - `S3_BUCKET_NAME`: Bucket for file storage.
+   - `WEB_BUCKET_NAME`: Bucket for frontend hosting.
 
-### Running the App
+### Running the App Locally
+
 The project uses a `makefile` to streamline commands.
 
-- **Run Backend & Frontend:**
+- **Start API (Local Dev):**
+
   ```bash
   make dev
   ```
-  This will start:
-  - API at `http://localhost:8000` (via `uv run fastapi dev`)
-  - Web UI at `http://localhost:5173` (via `npm run dev`)
 
-- **Run Backend Only:**
-  ```bash
-  make dev-api
-  ```
+  API is available at `http://localhost:8000`.
+  Swagger UI is at `http://localhost:8000/swagger-ui`.
 
-- **Run Frontend Only:**
+- **Start Frontend:**
   ```bash
   make dev-web
   ```
+  Web UI is available at `http://localhost:5173`.
 
-- **Linting & Formatting:**
-  ```bash
-  make lint    # Check for issues
-  make fix     # Fix auto-fixable issues
-  make format  # Format code
-  ```
+---
 
-- **Docker Build (Local Lambda Test):**
-  ```bash
-  make build
-  ```
+## Infrastructure Management
+
+The `manage` CLI tool (built in Rust) for managing AWS resources.
+
+### Database & Storage Setup
+
+Before your first run, you must create the necessary DynamoDB tables and S3 buckets:
+
+```bash
+# Create all DynamoDB tables (Users, Subjects, Chapters, Slides)
+make create-tables
+
+# Create the primary S3 bucket for files
+make create-bucket
+```
+
+### Resource Teardown
+
+```bash
+# Delete all tables
+make delete-tables
+
+# Delete S3 bucket and all its contents
+make delete-bucket
+```
+
+---
 
 ## Deployment
 
-Deployment is managed via Pulumi.
+Deployment has been migrated from Pulumi to custom high-performance scripts.
 
-1. **Setup Pulumi:** Ensure you have the Pulumi CLI installed and configured.
-2. **Deploy:**
-   ```bash
-   pulumi up
-   ```
-   This will provision/update all AWS resources defined in `__main__.py`.
+### 1. Deploy Backend
+
+Cross-compiles for Lambda and updates the function:
+
+```bash
+make deploy
+```
+
+### 2. Deploy Frontend
+
+Builds the React app with the correct API URL and syncs to S3:
+
+```bash
+make deploy-web
+```
+
+---
 
 ## Directory Structure
-- `app/`: Backend FastAPI application code.
-  - `api/`: API route handlers.
-  - `services/`: Business logic (Auth, AI, Storage).
+
+- `src/`: Rust Backend application code.
+  - `api/`: Route handlers and nested routers.
+  - `models/`: Data structures and `utoipa::ToSchema` definitions.
+  - `services/`: Core logic (AI, Auth, Storage, Background Tasks).
+  - `db/`: DynamoDB client and data access layers.
+  - `main.rs`: Application entry point (Hybrid TCP/Lambda server).
+  - `manage.rs`: Infrastructure management CLI.
 - `web/`: Frontend React application code.
-- `Pulumi.yaml` & `__main__.py`: Infrastructure as Code definitions.
-- `Dockerfile`: Container definition for the Lambda function.
+- `makefile`: Command shorthands for development and deployment.
+- `Dockerfile`: (Legacy) Used for optional containerized builds.
+
+---
+
+## OpenAPI & Documentation
+
+Slidegen features automatic API documentation. When the backend is running, visit:
+
+- **Interactive UI**: `/swagger-ui`
+- **JSON Spec**: `/api-docs/openapi.json`

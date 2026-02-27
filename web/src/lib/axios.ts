@@ -1,8 +1,8 @@
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL;
-const API_BASE_URL = `${API_URL}api`;
-
+const API_BASE_URL = `${API_URL||"http://localhost:8000"}/api`;
+console.log(API_BASE_URL);
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -32,8 +32,8 @@ api.interceptors.response.use(
       try {
         const refreshToken = localStorage.getItem('refresh_token');
         if (refreshToken) {
-            const response = await axios.post(`${API_BASE_URL}/auth/refresh`, null, {
-                params: { refresh_token: refreshToken }
+            const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+                refresh_token: refreshToken
             });
             
             const { access_token, refresh_token: newRefreshToken } = response.data;
@@ -51,6 +51,14 @@ api.interceptors.response.use(
         return Promise.reject(refreshError);
       }
     }
+
+    // Extract backend error message if available
+    if (error.response?.data?.message) {
+        error.message = error.response.data.message;
+    } else if (error.response?.data?.detail) {
+        error.message = error.response.data.detail;
+    }
+    
     return Promise.reject(error);
   }
 );

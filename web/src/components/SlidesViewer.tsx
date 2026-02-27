@@ -26,8 +26,8 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
     try {
       await chaptersApi.generateSlides(subjectId, chapterId);
       alert("Slides generation started. Please check back in a few moments.");
-    } catch {
-      alert("Failed to start slides generation.");
+    } catch (err: any) {
+      alert(err.message || "Failed to start slides generation.");
     }
   };
 

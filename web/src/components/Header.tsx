@@ -34,7 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Sparkles size={18} />
           </div>
           <span className="text-lg font-bold tracking-tight text-gray-900">
-            Lumina Learn
+            Slidegen
           </span>
         </div>
 

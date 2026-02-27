@@ -7,20 +7,19 @@ import { chaptersApi } from "../services/api";
 
 interface AddChapterProps {
   subjectId: string;
-
   isCreating: boolean;
   onSetIsCreating: (creating: boolean) => void;
 }
 
-export const AddChpater: React.FC<AddChapterProps> = ({
+export const AddChapter: React.FC<AddChapterProps> = ({
   subjectId,
   isCreating,
   onSetIsCreating,
 }) => {
   const [title, setTitle] = useState<string>("");
-  const [startPage, setStartPage] = useState(0);
-  const [endPage, setEndPage] = useState(0);
-  const [orderIndex, setOrderIndex] = useState(0);
+  const [startPage, setStartPage] = useState<string>("0");
+  const [endPage, setEndPage] = useState<string>("0");
+  const [orderIndex, setOrderIndex] = useState<string>("0");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{
     type: "success" | "error";
@@ -34,23 +33,35 @@ export const AddChpater: React.FC<AddChapterProps> = ({
     setMessage(null);
 
     try {
-      if (title && title === "" && startPage === 0 && endPage == 0) return;
+      if (!title.trim()) {
+        setMessage({ type: "error", text: "Chapter title is required." });
+        setIsLoading(false);
+        return;
+      }
+
+      const sPage = parseInt(startPage) || 0;
+      const ePage = parseInt(endPage) || 0;
+      const oIndex = parseInt(orderIndex) || 0;
 
       const createChapter: ChapterCreate = {
         subject_id: subjectId,
-        title: title,
-        page_start: startPage,
-        page_end: endPage,
-        order_index: orderIndex,
+        title: title.trim(),
+        page_start: sPage,
+        page_end: ePage,
+        order_index: oIndex,
       };
 
       await chaptersApi.createChapter(createChapter);
 
       setMessage({ type: "success", text: "Chapter added successfully." });
+      setTitle("");
+      setStartPage("0");
+      setEndPage("0");
+      setOrderIndex("0");
       onSetIsCreating(false);
-    } catch (error) {
-      console.error("Update failed", error);
-      setMessage({ type: "error", text: "Failed to add chapter." });
+    } catch (error: any) {
+      console.error("Create chapter failed", error);
+      setMessage({ type: "error", text: error.message || "Failed to add chapter." });
     } finally {
       setIsLoading(false);
     }
@@ -68,50 +79,38 @@ export const AddChpater: React.FC<AddChapterProps> = ({
             Chapter Title
           </label>
           <div className="relative">
-            {/* <User
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={20}
-                /> */}
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+              placeholder="e.g. Introduction"
+              className="w-full px-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+              required
             />
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Start Page
-          </label>
-          <div className="relative">
-            {/* <Mail
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={20}
-                /> */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Start Page
+            </label>
             <input
               type="number"
               value={startPage}
-              onChange={(e) => setStartPage(parseInt(e.target.value))}
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+              onChange={(e) => setStartPage(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
             />
           </div>
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            End Page
-          </label>
-          <div className="relative">
-            {/* <Mail
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={20}
-                /> */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              End Page
+            </label>
             <input
-              type="text"
+              type="number"
               value={endPage}
-              onChange={(e) => setEndPage(parseInt(e.target.value))}
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+              onChange={(e) => setEndPage(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
             />
           </div>
         </div>
@@ -120,18 +119,12 @@ export const AddChpater: React.FC<AddChapterProps> = ({
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             Order Index
           </label>
-          <div className="relative">
-            {/* <Mail
-                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={20}
-                /> */}
-            <input
-              type="text"
-              value={orderIndex}
-              onChange={(e) => setOrderIndex(parseInt(e.target.value))}
-              className="w-full pl-12 pr-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
-            />
-          </div>
+          <input
+            type="number"
+            value={orderIndex}
+            onChange={(e) => setOrderIndex(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl bg-gray-50 border-transparent focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+          />
         </div>
 
         {message && (
@@ -156,7 +149,7 @@ export const AddChpater: React.FC<AddChapterProps> = ({
           </Button>
           <Button type="submit" isLoading={isLoading}>
             <Save size={18} className="mr-2" />
-            Save Changes
+            Save Chapter
           </Button>
         </div>
       </form>

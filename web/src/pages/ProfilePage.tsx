@@ -75,9 +75,9 @@ export const ProfilePage: React.FC = () => {
       setIsEditing(false);
       setSelectedFile(null);
       setPreview(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Update failed", error);
-      setMessage({ type: "error", text: "Failed to update profile." });
+      setMessage({ type: "error", text: error.message || "Failed to update profile." });
     } finally {
       setIsLoading(false);
     }

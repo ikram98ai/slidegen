@@ -45,7 +45,7 @@ export const AuthScreen: React.FC = () => {
           <p className="text-gray-500 mt-2 text-lg">
             {isLogin
               ? "Enter your credentials to access your library."
-              : "Start your learning journey with Lumina."}
+              : "Start your learning journey with Slidegen."}
           </p>
         </div>
 

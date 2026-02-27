@@ -18,15 +18,13 @@ export const authApi = {
     const response = await api.post<UserResponse>("/auth/register", data);
     return response.data;
   },
-  login: async (formData: URLSearchParams): Promise<Token> => {
-    const response = await api.post<Token>("/auth/token", formData, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
+  login: async (credentials: { email: string; password: string }): Promise<Token> => {
+    const response = await api.post<Token>("/auth/token", credentials);
     return response.data;
   },
   refreshToken: async (refreshToken: string): Promise<Token> => {
-    const response = await api.post<Token>("/auth/refresh", null, {
-      params: { refresh_token: refreshToken },
+    const response = await api.post<Token>("/auth/refresh", {
+      refresh_token: refreshToken,
     });
     return response.data;
   },
@@ -83,7 +81,7 @@ export const subjectsApi = {
   },
   uploadSubject: async (formData: FormData): Promise<SubjectResponse> => {
     const response = await api.post<SubjectResponse>(
-      "/subjects/upload",
+      "/subjects",
       formData,
       {
         headers: { "Content-Type": "multipart/form-data" },
@@ -160,13 +158,13 @@ export const slidesApi = {
     slideId: string,
     data: SlideUpdate
   ): Promise<SlideResponse> => {
-    const response = await api.patch<SlideResponse>(`/chpaters/${chapterId}/slides/${slideId}`, data);
+    const response = await api.patch<SlideResponse>(`/chapters/${chapterId}/slides/${slideId}`, data);
     return response.data;
   },
   deleteSlide: async (
     chapterId: string,
     slideId: string
   ): Promise<void> => {
-    await api.delete(`/chpaters/${chapterId}/slides/${slideId}`);
+    await api.delete(`/chapters/${chapterId}/slides/${slideId}`);
   },
 };

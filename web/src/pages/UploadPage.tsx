@@ -61,14 +61,14 @@ export const UploadPage: React.FC = () => {
           resetUpload();
           navigate("/profile");
         },
-        onError: () => {
+        onError: (err: any) => {
           setIsAnalyzing(false);
-          setError("Failed to save subject.");
+          setError(err.message || "Failed to save subject.");
         },
       });
-    } catch {
+    } catch (err: any) {
       setIsAnalyzing(false);
-      setError("We encountered an issue analyzing your subject.");
+      setError(err.message || "We encountered an issue analyzing your subject.");
     }
   };
   return (
@@ -85,9 +85,9 @@ export const UploadPage: React.FC = () => {
             </span>
           </h1>
           <p className="text-lg text-gray-500 font-medium leading-relaxed">
-            Upload a textbook or report. Lumina analyzes the content, structures
-            it, and designs beautiful presentation slides instantly with voice
-            narrations.
+            Upload a textbook or report. Slidegen analyzes the content,
+            structures it, and designs beautiful presentation slides instantly
+            with voice narrations.
           </p>
         </div>
 

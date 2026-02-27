@@ -28,10 +28,8 @@ export const useAuthStore = create<AuthState>()(
       login: async (email, password) => {
         set({ isLoading: true, error: null });
         try {
-          const formData = new URLSearchParams();
-          formData.append("username", email);
-          formData.append("password", password);
-          const { access_token, refresh_token } = await authApi.login(formData);
+    
+          const { access_token, refresh_token } = await authApi.login({email,password});
 
           localStorage.setItem("access_token", access_token);
           localStorage.setItem("refresh_token", refresh_token);

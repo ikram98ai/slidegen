@@ -1,38 +1,63 @@
-include .env
-
-sync:
-	uv sync
-lint:
-	uv run ruff check
-
-fix:
-	uv run ruff check --fix
+rust-version:
+	@echo "Rust command-line utility versions:"
+	rustc --version 			#rust compiler
+	cargo --version 			#rust package manager
+	rustfmt --version			#rust code formatter
+	rustup --version			#rust toolchain manager
+	clippy-driver --version		#rust linter
 
 format:
-	uv run ruff format
+	cargo fmt --quiet
 
-dev:
-	uv run fastapi dev app/main.py
-	
-dev-web:
-	cd web && npm run dev
+lint:
+	cargo clippy --quiet
 
+test:
+	cargo test --quiet
+
+#### Cargo Lambda Section ####
+## Watches for changes and rebuilds
+watch:
+	cargo lambda watch
+
+invoke:
+	cargo lambda invoke --data-ascii "{}"
+
+### Build for AWS Lambda (use arm64 for AWS Graviton2)
 build:
-	@echo "Building Docker image..."
-	docker build -t lumina-lambda .
+	cargo lambda build --release --arm64
 
-	@echo "Running Docker container..."
-	docker run -p 8000:8000 \
-		-e GEMINI_API_KEY=${GEMINI_API_KEY} \
-		-e SECRET_KEY=${SECRET_KEY} \
-		-e DEBUG=True \
-		lumina-lambda
+deploy:
+	cargo lambda deploy --region us-east-1
 
+### Invoke on AWS
+aws-invoke:
+	cargo lambda invoke --remote slidegen-lambda --data-ascii "{}"
 
-set-secrets:
-	@echo "Setting GitHub Actions secrets..."
-	gh secret set AWS_REGION --body ${AWS_REGION}
-	gh secret set AWS_ACCESS_KEY_ID --body ${AWS_ACCESS_KEY_ID}
-	gh secret set AWS_SECRET_ACCESS_KEY --body ${AWS_SECRET_ACCESS_KEY}
-	gh secret set GEMINI_API_KEY --body ${GEMINI_API_KEY}
-	gh secret set SECRET_KEY --body ${SECRET_KEY}
+run:
+	cargo run --bin slidegen
+
+release:
+	cargo build --release
+
+### Deploy React Frontend to S3 and CloudFront
+deploy-web:
+	cd web && npm run deploy
+
+all: format lint test run
+
+# Create all DynamoDB tables (Users, Subjects, Chapters, Slides)
+create-tables:
+	cargo run --bin manage -- db create-tables
+
+# Delete all tables
+delete-tables:
+	cargo run --bin manage -- db delete-tables
+
+# Create the primary S3 bucket for files
+create-bucket:
+	cargo run --bin manage -- s3 create-bucket
+
+# Delete S3 bucket and all its contents
+delete-bucket:
+	cargo run --bin manage -- s3 delete-bucket

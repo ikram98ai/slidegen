@@ -1,6 +1,6 @@
 import { ChevronLeft, PlusCircle } from "lucide-react";
 import type { ChapterResponse, SubjectResponse } from "../types";
-import { AddChpater } from "./AddChapter";
+import { AddChapter } from "./AddChapter";
 import { useState } from "react";
 
 interface ToCSidbarProps {
@@ -49,7 +49,7 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
       </button>
 
       <div className="overflow-y-auto flex-1 p-4 space-y-2">
-        <AddChpater
+        <AddChapter
           subjectId={subject.id}
           isCreating={isCreating}
           onSetIsCreating={setIsCreating}
