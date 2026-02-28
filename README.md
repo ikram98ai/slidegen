@@ -2,7 +2,7 @@
 
 ## Overview
 
-Slidegen is an advanced educational platform designed to generate and manage educational content (slides and chapters) from uploaded files. It leverages Rust for high-performance processing and Generative AI (Google Gemini) for intelligent content extraction and slide generation.
+Slidegen is an advanced educational platform designed to generate and manage slides from uploaded files. It leverages Rust for high-performance processing and Generative AI (Google Gemini) for intelligent content extraction and slide generation.
 
 ## Technology Stack
 
