@@ -104,6 +104,7 @@ export const ReaderPage: React.FC = () => {
                   setCurrentHorizontalIndex={setCurrentHorizontalIndex}
                   subjectId={subject.id}
                   chapterId={activeViewerChapter?.id}
+                  isProcessing={activeViewerChapter?.processing_status === "processing"}
                 />
               )}
             </div>

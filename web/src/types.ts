@@ -81,6 +81,7 @@ export interface ChapterResponse {
   order_index: number;
   id: string;
   subject_id: string;
+  processing_status?: string | null;
   created_at: string;
   updated_at?: string | null;
 }

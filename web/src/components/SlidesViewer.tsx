@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, Layout } from "lucide-react";
+import { ChevronLeft, ChevronRight, Layout, Loader2 } from "lucide-react";
 import { SlideCard } from "./SlideCard";
 import { useChapterSlides } from "../hooks/useAppQueries";
 import { Button } from "./ui/Button";
@@ -11,6 +11,7 @@ interface SlidesViewerProps {
   setCurrentHorizontalIndex: (index: number) => void;
   subjectId: string;
   chapterId: string;
+  isProcessing?: boolean;
 }
 
 export const SlidesViewer: React.FC<SlidesViewerProps> = ({
@@ -19,6 +20,7 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   setCurrentHorizontalIndex,
   subjectId,
   chapterId,
+  isProcessing = false,
 }) => {
   const { data: slides } = useChapterSlides(chapterId);
 
@@ -47,6 +49,17 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
     );
   } else {
     // Horizontal (Presentation) Mode
+    if (isProcessing) {
+      return (
+        <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
+          <Loader2 className="w-16 h-16 text-blue-500 mb-4 animate-spin" />
+          <p className="text-gray-500 mb-6 font-medium">
+            Generating your slides. This may take a moment...
+          </p>
+        </div>
+      );
+    }
+    
     if (slides === undefined || slides.length === 0)
       return (
         <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">

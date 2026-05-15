@@ -15,6 +15,10 @@ lint:
 test:
 	cargo test --quiet
 
+install:
+	cargo install --path .
+	cd web && pnpm install
+
 #### Cargo Lambda Section ####
 ## Watches for changes and rebuilds
 watch:

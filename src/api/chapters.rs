@@ -75,6 +75,7 @@ pub async fn create_chapter(
         page_start: payload.page_start,
         page_end: payload.page_end,
         order_index: payload.order_index,
+        processing_status: Some("completed".to_string()),
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -240,10 +241,15 @@ pub async fn generate_slides(
     // In axum, to do background tasks, we can spawn a tokio task taking Arc-wrapped state
     let bg_service = state.bg_tasks.clone();
     let uid = current_user.id.clone();
+    
+    let mut chapter_to_process = chapter.clone();
+    chapter_to_process.processing_status = Some("processing".to_string());
+    chapter_to_process.updated_at = Utc::now();
+    let _ = state.db.save_chapter(&chapter_to_process).await;
 
     tokio::spawn(async move {
         bg_service
-            .generate_slides_bg(uid, subject_id, chapter)
+            .generate_slides_bg(uid, subject_id, chapter_to_process)
             .await;
     });
 

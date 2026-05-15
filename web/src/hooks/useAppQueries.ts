@@ -60,6 +60,13 @@ export const useSubjects = () => {
       const subjects = await subjectsApi.listSubjects();
       return subjects;
     },
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.some(s => s.processing_status === "processing")) {
+        return 3000;
+      }
+      return false;
+    },
   });
 };
 
@@ -82,6 +89,13 @@ export const useUserSubjects = (userId: string | undefined) => {
       return subjects;
     },
     enabled: !!userId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.some(s => s.processing_status === "processing")) {
+        return 3000;
+      }
+      return false;
+    },
   });
 };
 
@@ -95,6 +109,13 @@ export const useSubjectChapters = (subjectId: string | undefined) => {
       return chapters;
     },
     enabled: !!subjectId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.chapters && data.chapters.some(c => c.processing_status === "processing")) {
+        return 3000;
+      }
+      return false;
+    },
   });
 };
 

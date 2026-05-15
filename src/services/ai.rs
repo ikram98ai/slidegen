@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct AIService {
     client: Client,
     api_key: String,
+    text_model: String,
 }
 
 // Internal Gemini REST API Request/Response structs
@@ -135,8 +136,9 @@ impl AIService {
             .expect("GEMINI_API_KEY must be set")
             .clone();
         let client = Client::new();
+        let text_model = settings.text_model.clone();
 
-        AIService { client, api_key }
+        AIService { client, api_key, text_model }
     }
 
     async fn call_gemini_text(&self, model: &str, system_instruction: Option<String>, prompt: String) -> Result<String> {
@@ -194,7 +196,7 @@ impl AIService {
             toc
         );
 
-        let completion = self.call_gemini_text("gemini-3-flash-preview", Some(system_instruction), prompt).await?;
+        let completion = self.call_gemini_text(&self.text_model, Some(system_instruction), prompt).await?;
 
         // simple heuristic to extract json if wrapped in markdown
         let json_str = completion.replace("```json", "").replace("```", "").trim().to_string();
@@ -214,7 +216,7 @@ impl AIService {
             page_text
         );
 
-        let completion = self.call_gemini_text("gemini-3-flash-preview", Some(system_instruction), prompt).await?;
+        let completion = self.call_gemini_text(&self.text_model, Some(system_instruction), prompt).await?;
 
         let json_str = completion.replace("```json", "").replace("```", "").trim().to_string();
         let slides: Slides = serde_json::from_str(&json_str).with_context(|| format!("Failed to parse slides JSON: {}", json_str))?;

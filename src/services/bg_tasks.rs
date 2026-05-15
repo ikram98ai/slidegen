@@ -106,6 +106,7 @@ impl BackgroundTasksService {
                 page_start: c_data.page_start,
                 page_end: c_data.page_end,
                 order_index: idx as i32,
+                processing_status: Some("completed".to_string()),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             });
@@ -135,12 +136,16 @@ impl BackgroundTasksService {
             "Background: generating slides for chapter"
         );
 
-        if let Err(e) = self.do_generate_slides(&user_id, &subject_id, chapter).await {
+        if let Err(e) = self.do_generate_slides(&user_id, &subject_id, &chapter).await {
             tracing::error!(error = %e, "Failed to generate slides background task");
+            if let Ok(Some(mut c)) = self.db.get_chapter(&subject_id, &chapter.id).await {
+                c.processing_status = Some("failed".to_string());
+                let _ = self.db.save_chapter(&c).await;
+            }
         }
     }
 
-    async fn do_generate_slides(&self, user_id: &str, subject_id: &str, chapter: Chapter) -> Result<()> {
+    async fn do_generate_slides(&self, user_id: &str, subject_id: &str, chapter: &Chapter) -> Result<()> {
         // 1. Get subject to find file path
         let subject = self.db.get_subject(subject_id).await?
             .context("Subject not found")?;
@@ -189,7 +194,7 @@ impl BackgroundTasksService {
                 if let Ok(audio_bytes) = general_purpose::STANDARD.decode(audio_base64) {
                     let audio_key = format!("audio/{}/{}/{}.mp3", user_id, chapter.id, slide_id);
                     if self.storage.upload_file(&audio_key, audio_bytes).await.is_ok() {
-                        voice_url = Some(self.storage.get_public_url(&audio_key));
+                        voice_url = Some(audio_key);
                     }
                 }
             }
@@ -208,6 +213,12 @@ impl BackgroundTasksService {
             };
 
             self.db.save_slide(&slide).await.context("Failed to save slide")?;
+        }
+
+        if let Some(mut c) = self.db.get_chapter(subject_id, &chapter.id).await? {
+            c.processing_status = Some("completed".to_string());
+            c.updated_at = Utc::now();
+            self.db.save_chapter(&c).await.context("Failed to update chapter status")?;
         }
 
         Ok(())

@@ -10,6 +10,7 @@ pub struct Chapter {
     pub page_start: i32,
     pub page_end: i32,
     pub order_index: i32,
+    pub processing_status: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -39,6 +40,7 @@ pub struct ChapterResponse {
     pub page_start: i32,
     pub page_end: i32,
     pub order_index: i32,
+    pub processing_status: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -52,6 +54,7 @@ impl From<Chapter> for ChapterResponse {
             page_start: chapter.page_start,
             page_end: chapter.page_end,
             order_index: chapter.order_index,
+            processing_status: chapter.processing_status,
             created_at: chapter.created_at,
             updated_at: Some(chapter.updated_at),
         }

@@ -7,6 +7,8 @@ import {
   Trash2,
   Eye,
   EyeOff,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 import type { SubjectResponse } from "../types";
 import { DocType } from "../types";
@@ -54,8 +56,14 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
   return (
     <>
       <div
-        onClick={() => onClick(subject)}
-        className="group bg-white rounded-3xl p-6 shadow-apple-sm hover:shadow-apple-xl border border-gray-100 transition-all duration-300 cursor-pointer flex flex-col h-full"
+        onClick={() => {
+          if (subject.processing_status !== "processing") {
+            onClick(subject);
+          }
+        }}
+        className={`group bg-white rounded-3xl p-6 shadow-apple-sm hover:shadow-apple-xl border border-gray-100 transition-all duration-300 flex flex-col h-full ${
+          subject.processing_status === "processing" ? "opacity-75 cursor-wait" : "cursor-pointer"
+        }`}
       >
         <div className="flex justify-between items-start mb-6">
           <div
@@ -108,6 +116,18 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
             <Clock size={14} />
             <span>{new Date(subject.created_at).toLocaleDateString()}</span>
           </div>
+          {subject.processing_status === "processing" && (
+            <div className="flex items-center text-blue-500 font-medium">
+              <Loader2 size={14} className="mr-1 animate-spin" />
+              Processing...
+            </div>
+          )}
+          {subject.processing_status === "failed" && (
+            <div className="flex items-center text-red-500 font-medium">
+              <AlertCircle size={14} className="mr-1" />
+              Failed
+            </div>
+          )}
         </div>
       </div>
       <Modal isOpen={isEditing} onClose={() => setIsEditing(false)}>

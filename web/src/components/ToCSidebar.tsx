@@ -1,4 +1,4 @@
-import { ChevronLeft, PlusCircle } from "lucide-react";
+import { ChevronLeft, PlusCircle, Loader2 } from "lucide-react";
 import type { ChapterResponse, SubjectResponse } from "../types";
 import { AddChapter } from "./AddChapter";
 import { useState } from "react";
@@ -81,15 +81,20 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
               {index + 1}
             </div>
             <div>
-              <h3
-                className={`font-semibold text-sm ${
-                  activeViewerChapter?.id === chapter.id
-                    ? "text-blue-900"
-                    : "text-gray-700"
-                }`}
-              >
-                {chapter.title}
-              </h3>
+              <div className="flex items-center space-x-2">
+                <h3
+                  className={`font-semibold text-sm ${
+                    activeViewerChapter?.id === chapter.id
+                      ? "text-blue-900"
+                      : "text-gray-700"
+                  }`}
+                >
+                  {chapter.title}
+                </h3>
+                {chapter.processing_status === "processing" && (
+                  <Loader2 size={12} className="text-blue-500 animate-spin" />
+                )}
+              </div>
               <span className="text-xs text-gray-400">page: {chapter.page_start} - {chapter.page_end}</span>
             </div>
           </button>

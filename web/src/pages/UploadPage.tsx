@@ -29,16 +29,8 @@ export const UploadPage: React.FC = () => {
   // Use passed isAnalyzing (from mutation) or store's isAnalyzing
 
   const onFileSelect = (selectedFile: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      const base64 = result.split(",")[1];
-
-      setFile(selectedFile);
-      setFileBase64(base64);
-      setError(null);
-    };
-    reader.readAsDataURL(selectedFile);
+    setFile(selectedFile);
+    setError(null);
   };
 
   const onStartAnalysis = async () => {
