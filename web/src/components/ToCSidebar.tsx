@@ -92,7 +92,14 @@ export const ToCSidbar: React.FC<ToCSidbarProps> = ({
                   {chapter.title}
                 </h3>
                 {chapter.processing_status === "processing" && (
-                  <Loader2 size={12} className="text-blue-500 animate-spin" />
+                  <span className="flex items-center space-x-1 text-blue-500">
+                    <Loader2 size={12} className="animate-spin" />
+                    {(chapter.total_slides ?? 0) > 0 && (
+                      <span className="text-[10px] font-semibold tabular-nums">
+                        {chapter.processed_slides ?? 0}/{chapter.total_slides}
+                      </span>
+                    )}
+                  </span>
                 )}
               </div>
               <span className="text-xs text-gray-400">page: {chapter.page_start} - {chapter.page_end}</span>

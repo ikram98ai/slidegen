@@ -72,7 +72,7 @@ export const useSubjects = () => {
 
 export const useSubject = (subjectId: string | undefined) => {
   return useQuery<SubjectResponse | null>({
-    queryKey: ["subjects"],
+    queryKey: ["subjects", subjectId],
     queryFn: async () => {
       if (!subjectId) return null;
       const subject = await subjectsApi.getSubject(subjectId);
@@ -156,6 +156,19 @@ export const useUpdateSubject = () => {
   });
 };
 
+export const useReprocessSubject = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      return await subjectsApi.reprocessSubject(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subjects"] });
+      queryClient.invalidateQueries({ queryKey: ["userSubjects"] });
+    },
+  });
+};
+
 export const useDeleteSubject = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -168,7 +181,7 @@ export const useDeleteSubject = () => {
   });
 };
 
-export const useChapterSlides = (chapterId: string) => {
+export const useChapterSlides = (chapterId: string, pollWhileGenerating = false) => {
   return useQuery<SlideResponse[]>({
     queryKey: ["chapters", chapterId],
     queryFn: async () => {
@@ -178,6 +191,9 @@ export const useChapterSlides = (chapterId: string) => {
       return slides;
     },
     enabled: !!chapterId,
+    // While slides are being generated, keep fetching so finished slides
+    // stream in as the background job saves them.
+    refetchInterval: pollWhileGenerating ? 3000 : false,
   });
 };
 

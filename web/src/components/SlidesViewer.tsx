@@ -1,17 +1,19 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Layout, Loader2 } from "lucide-react";
 import { SlideCard } from "./SlideCard";
 import { useChapterSlides } from "../hooks/useAppQueries";
 import { Button } from "./ui/Button";
+import { CircularProgress } from "./ui/CircularProgress";
 import { chaptersApi } from "../services/api";
+import type { ChapterResponse } from "../types";
 
 interface SlidesViewerProps {
   viewMode: "vertical" | "horizontal";
   currentHorizontalIndex: number;
   setCurrentHorizontalIndex: (index: number) => void;
   subjectId: string;
-  chapterId: string;
-  isProcessing?: boolean;
+  chapter: ChapterResponse;
 }
 
 export const SlidesViewer: React.FC<SlidesViewerProps> = ({
@@ -19,17 +21,32 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   currentHorizontalIndex,
   setCurrentHorizontalIndex,
   subjectId,
-  chapterId,
-  isProcessing = false,
+  chapter,
 }) => {
-  const { data: slides } = useChapterSlides(chapterId);
+  const queryClient = useQueryClient();
+  const chapterId = chapter.id;
+  const isProcessing = chapter.processing_status === "processing";
+  const { data: slides } = useChapterSlides(chapterId, isProcessing);
+
+  // When generation finishes, fetch the final slide set one last time (the
+  // last poll may have run before the job saved the final slide).
+  const wasProcessing = useRef(isProcessing);
+  useEffect(() => {
+    if (wasProcessing.current && !isProcessing) {
+      queryClient.invalidateQueries({ queryKey: ["chapters", chapterId] });
+    }
+    wasProcessing.current = isProcessing;
+  }, [isProcessing, chapterId, queryClient]);
 
   const generateSlidesForActiveChapter = async () => {
     try {
       await chaptersApi.generateSlides(subjectId, chapterId);
-      alert("Slides generation started. Please check back in a few moments.");
-    } catch (err: any) {
-      alert(err.message || "Failed to start slides generation.");
+      // Refresh chapter status immediately so the progress view appears.
+      queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
+    } catch (err) {
+      alert(
+        err instanceof Error ? err.message : "Failed to start slides generation."
+      );
     }
   };
 
@@ -50,16 +67,29 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   } else {
     // Horizontal (Presentation) Mode
     if (isProcessing) {
+      const total = chapter.total_slides ?? 0;
+      const processed = chapter.processed_slides ?? 0;
       return (
         <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
-          <Loader2 className="w-16 h-16 text-blue-500 mb-4 animate-spin" />
-          <p className="text-gray-500 mb-6 font-medium">
-            Generating your slides. This may take a moment...
-          </p>
+          {total > 0 ? (
+            <>
+              <CircularProgress processed={processed} total={total} size={96} />
+              <p className="text-gray-500 mt-6 font-medium">
+                Generating slides with narration — {processed} of {total} ready
+              </p>
+            </>
+          ) : (
+            <>
+              <Loader2 className="w-16 h-16 text-blue-500 mb-4 animate-spin" />
+              <p className="text-gray-500 mb-6 font-medium">
+                Reading the chapter and planning your slides...
+              </p>
+            </>
+          )}
         </div>
       );
     }
-    
+
     if (slides === undefined || slides.length === 0)
       return (
         <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">

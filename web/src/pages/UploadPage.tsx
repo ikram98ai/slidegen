@@ -18,7 +18,6 @@ export const UploadPage: React.FC = () => {
     isAnalyzing,
     setFile,
     setDocType,
-    setFileBase64,
     setIsAnalyzing,
     setError,
     reset: resetUpload,

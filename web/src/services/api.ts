@@ -110,6 +110,12 @@ export const subjectsApi = {
   deleteSubject: async (subjectId: string): Promise<void> => {
     await api.delete(`/subjects/${subjectId}`);
   },
+  reprocessSubject: async (subjectId: string): Promise<SubjectResponse> => {
+    const response = await api.post<SubjectResponse>(
+      `/subjects/${subjectId}/reprocess`
+    );
+    return response.data;
+  },
 };
 
 export const chaptersApi = {

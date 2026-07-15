@@ -52,6 +52,8 @@ export interface SubjectResponse {
   user_id: string;
   file_path: string;
   processing_status: string;
+  processed_pages?: number | null;
+  total_pages?: number | null;
   created_at: string;
   updated_at?: string | null;
 }
@@ -82,6 +84,8 @@ export interface ChapterResponse {
   id: string;
   subject_id: string;
   processing_status?: string | null;
+  processed_slides?: number | null;
+  total_slides?: number | null;
   created_at: string;
   updated_at?: string | null;
 }

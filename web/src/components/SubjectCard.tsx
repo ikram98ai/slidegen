@@ -9,12 +9,18 @@ import {
   EyeOff,
   AlertCircle,
   Loader2,
+  RotateCcw,
 } from "lucide-react";
 import type { SubjectResponse } from "../types";
 import { DocType } from "../types";
-import { useUpdateSubject, useDeleteSubject } from "../hooks/useAppQueries";
+import {
+  useUpdateSubject,
+  useDeleteSubject,
+  useReprocessSubject,
+} from "../hooks/useAppQueries";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
+import { CircularProgress } from "./ui/CircularProgress";
 import { useAuthStore } from "../store/authStore";
 
 interface SubjectCardProps {
@@ -31,7 +37,13 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
 
   const updateSubject = useUpdateSubject();
   const deleteSubject = useDeleteSubject();
+  const reprocessSubject = useReprocessSubject();
   const { user } = useAuthStore();
+
+  const handleReprocess = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    reprocessSubject.mutate(subject.id);
+  };
 
   const handleUpdate = () => {
     updateSubject.mutate({ id: subject.id, data: { title: editedTitle } });
@@ -116,16 +128,47 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
             <Clock size={14} />
             <span>{new Date(subject.created_at).toLocaleDateString()}</span>
           </div>
-          {subject.processing_status === "processing" && (
-            <div className="flex items-center text-blue-500 font-medium">
-              <Loader2 size={14} className="mr-1 animate-spin" />
-              Processing...
-            </div>
-          )}
+          {subject.processing_status === "processing" &&
+            (subject.total_pages && subject.total_pages > 0 ? (
+              <div className="flex items-center text-blue-500 font-medium">
+                <CircularProgress
+                  processed={subject.processed_pages ?? 0}
+                  total={subject.total_pages}
+                  size={38}
+                />
+                <span className="ml-2">
+                  {(subject.processed_pages ?? 0) >= subject.total_pages
+                    ? "Analyzing..."
+                    : "Reading pages..."}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center text-blue-500 font-medium">
+                <Loader2 size={14} className="mr-1 animate-spin" />
+                Processing...
+              </div>
+            ))}
           {subject.processing_status === "failed" && (
-            <div className="flex items-center text-red-500 font-medium">
-              <AlertCircle size={14} className="mr-1" />
-              Failed
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center text-red-500 font-medium">
+                <AlertCircle size={14} className="mr-1" />
+                Failed
+              </div>
+              {user && user.id === subject.user_id && (
+                <button
+                  onClick={handleReprocess}
+                  disabled={reprocessSubject.isPending}
+                  className="flex items-center px-2 py-1 rounded-full text-blue-600 font-medium hover:bg-blue-50 disabled:opacity-50"
+                  title="Reprocess this file"
+                >
+                  {reprocessSubject.isPending ? (
+                    <Loader2 size={14} className="mr-1 animate-spin" />
+                  ) : (
+                    <RotateCcw size={14} className="mr-1" />
+                  )}
+                  Retry
+                </button>
+              )}
             </div>
           )}
         </div>

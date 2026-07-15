@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useSubjectChapters } from "../hooks/useAppQueries";
-import { LayoutTemplate, Rows } from "lucide-react";
+import { LayoutTemplate, Loader2, Rows } from "lucide-react";
 import { SlidesViewer } from "../components/SlidesViewer";
 import { ToCSidbar } from "../components/ToCSidebar";
-import type { ChapterResponse } from "../types";
 
 const ViewMode = {
   VERTICAL: "vertical",
@@ -16,15 +15,20 @@ export const ReaderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
   const navigate = useNavigate();
-  const { data: subject } = useSubjectChapters(id);
+  const { data: subject, isPending } = useSubjectChapters(id);
 
-  const [activeViewerChapter, setActiveViewerChapter] =
-    useState<ChapterResponse>();
+  const [activeChapterId, setActiveChapterId] = useState<string>();
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.HORIZONTAL);
   const [currentHorizontalIndex, setCurrentHorizontalIndex] = useState(0);
 
+  // Resolve the active chapter from the live query data (not a stale
+  // snapshot) so processing status and progress update as polling refetches.
+  const activeViewerChapter = subject?.chapters?.find(
+    (c) => c.id === activeChapterId
+  );
+
   const resetViewer = useCallback(() => {
-    setActiveViewerChapter(undefined);
+    setActiveChapterId(undefined);
     setViewMode(ViewMode.HORIZONTAL);
     setCurrentHorizontalIndex(0);
   }, []);
@@ -64,7 +68,20 @@ export const ReaderPage: React.FC = () => {
     </div>
   );
 
-  if (!subject) return <div>No Subject found</div>;
+  if (isPending)
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-4rem)] text-gray-400">
+        <Loader2 size={32} className="animate-spin mr-3 text-blue-500" />
+        Loading...
+      </div>
+    );
+
+  if (!subject)
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-4rem)] text-gray-500">
+        No subject found
+      </div>
+    );
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-gray-50">
@@ -73,7 +90,7 @@ export const ReaderPage: React.FC = () => {
         subject={subject}
         chapters={subject.chapters || []}
         activeViewerChapter={activeViewerChapter}
-        onSetActiveViewerChapter={setActiveViewerChapter}
+        onSetActiveViewerChapter={(chapter) => setActiveChapterId(chapter?.id)}
         onSetCurrentHorizontalIndex={setCurrentHorizontalIndex}
         onCloseSubject={closeSubject}
       />
@@ -103,8 +120,7 @@ export const ReaderPage: React.FC = () => {
                   currentHorizontalIndex={currentHorizontalIndex}
                   setCurrentHorizontalIndex={setCurrentHorizontalIndex}
                   subjectId={subject.id}
-                  chapterId={activeViewerChapter?.id}
-                  isProcessing={activeViewerChapter?.processing_status === "processing"}
+                  chapter={activeViewerChapter}
                 />
               )}
             </div>
