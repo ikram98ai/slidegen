@@ -11,6 +11,13 @@ pub struct Chapter {
     pub page_end: i32,
     pub order_index: i32,
     pub processing_status: Option<String>,
+    /// Slides finished so far by the current generation run (None until the
+    /// run knows the slide count; absent on items written by older versions).
+    #[serde(default)]
+    pub processed_slides: Option<i32>,
+    /// Total slides the current generation run will produce.
+    #[serde(default)]
+    pub total_slides: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -41,6 +48,10 @@ pub struct ChapterResponse {
     pub page_end: i32,
     pub order_index: i32,
     pub processing_status: Option<String>,
+    #[serde(default)]
+    pub processed_slides: Option<i32>,
+    #[serde(default)]
+    pub total_slides: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -55,6 +66,8 @@ impl From<Chapter> for ChapterResponse {
             page_end: chapter.page_end,
             order_index: chapter.order_index,
             processing_status: chapter.processing_status,
+            processed_slides: chapter.processed_slides,
+            total_slides: chapter.total_slides,
             created_at: chapter.created_at,
             updated_at: Some(chapter.updated_at),
         }

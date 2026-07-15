@@ -5,7 +5,7 @@ use axum::{
     routing::{get, patch, post},
 };
 use chrono::Utc;
-use serde::{Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -15,26 +15,21 @@ use crate::error::AppError;
 use crate::models::{
     Chapter, ChapterCreate, ChapterResponse, ChapterUpdate, SlideResponse, SlideUpdate,
 };
+use crate::services::bg_tasks::Job;
 
 pub fn router() -> Router<Arc<AppState>> {
     use axum::routing::delete;
     Router::new()
         .route("/", post(create_chapter))
         .route("/{subject_id}/{chapter_id}", patch(update_chapter))
-        .route(
-            "/{subject_id}/{chapter_id}",
-            delete(delete_chapter),
-        )
+        .route("/{subject_id}/{chapter_id}", delete(delete_chapter))
         .route(
             "/{subject_id}/{chapter_id}/slides/generate",
             post(generate_slides),
         )
         .route("/{chapter_id}/slides", get(get_chapter_slides))
         .route("/{chapter_id}/slides/{slide_id}", patch(update_slide))
-        .route(
-            "/{chapter_id}/slides/{slide_id}",
-            delete(delete_slide),
-        )
+        .route("/{chapter_id}/slides/{slide_id}", delete(delete_slide))
 }
 
 #[utoipa::path(
@@ -64,7 +59,9 @@ pub async fn create_chapter(
     };
 
     if current_user.id != subject.user_id {
-        return Err(AppError::Forbidden("You do not have permission to add chapters to this subject".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to add chapters to this subject".to_string(),
+        ));
     }
 
     let chapter = Chapter {
@@ -76,6 +73,8 @@ pub async fn create_chapter(
         page_end: payload.page_end,
         order_index: payload.order_index,
         processing_status: Some("completed".to_string()),
+        processed_slides: None,
+        total_slides: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -120,7 +119,9 @@ pub async fn update_chapter(
     };
 
     if current_user.id != subject.user_id {
-        return Err(AppError::Forbidden("You do not have permission to update this chapter".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to update this chapter".to_string(),
+        ));
     }
 
     let mut chapter = match state.db.get_chapter(&subject_id, &chapter_id).await {
@@ -179,7 +180,9 @@ pub async fn delete_chapter(
     };
 
     if current_user.id != chapter.user_id {
-        return Err(AppError::Forbidden("You do not have permission to delete this chapter".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to delete this chapter".to_string(),
+        ));
     }
 
     // Delete slides
@@ -235,23 +238,29 @@ pub async fn generate_slides(
     };
 
     if current_user.id != chapter.user_id {
-        return Err(AppError::Forbidden("You do not have permission to generate slides for this chapter".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to generate slides for this chapter".to_string(),
+        ));
     }
 
-    // In axum, to do background tasks, we can spawn a tokio task taking Arc-wrapped state
-    let bg_service = state.bg_tasks.clone();
-    let uid = current_user.id.clone();
-    
+    // Mark the chapter as processing before handing the job off.
     let mut chapter_to_process = chapter.clone();
     chapter_to_process.processing_status = Some("processing".to_string());
+    chapter_to_process.processed_slides = None;
+    chapter_to_process.total_slides = None;
     chapter_to_process.updated_at = Utc::now();
     let _ = state.db.save_chapter(&chapter_to_process).await;
 
-    tokio::spawn(async move {
-        bg_service
-            .generate_slides_bg(uid, subject_id, chapter_to_process)
-            .await;
-    });
+    // Background execution: SQS + worker Lambda in production, in-process locally.
+    state
+        .bg_tasks
+        .dispatch(Job::GenerateSlides {
+            user_id: current_user.id.clone(),
+            subject_id,
+            chapter_id,
+        })
+        .await
+        .map_err(AppError::InternalServerError)?;
 
     Ok(Json(GenerativeResponse {
         message: "Slide generation started".to_string(),
@@ -283,10 +292,10 @@ pub async fn get_chapter_slides(
     let mut response = Vec::new();
 
     for mut slide in slides {
-        if let Some(voice_url) = &slide.voice_url {
-            if let Ok(presigned) = state.storage.get_presigned_url(voice_url, 3600).await {
-                slide.voice_url = Some(presigned);
-            }
+        if let Some(voice_url) = &slide.voice_url
+            && let Ok(presigned) = state.storage.get_presigned_url(voice_url, 3600).await
+        {
+            slide.voice_url = Some(presigned);
         }
         response.push(SlideResponse::from(slide));
     }
@@ -325,7 +334,9 @@ pub async fn update_slide(
     };
 
     if current_user.id != slide.user_id {
-        return Err(AppError::Forbidden("You do not have permission to update this slide".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to update this slide".to_string(),
+        ));
     }
 
     if let Some(title) = payload.title {
@@ -382,7 +393,9 @@ pub async fn delete_slide(
     };
 
     if current_user.id != slide.user_id {
-        return Err(AppError::Forbidden("You do not have permission to delete this slide".to_string()));
+        return Err(AppError::Forbidden(
+            "You do not have permission to delete this slide".to_string(),
+        ));
     }
 
     state

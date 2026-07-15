@@ -17,6 +17,13 @@ pub struct Subject {
     pub is_public: bool,
     pub r#type: SubjectType,
     pub processing_status: String,
+    /// Pages extracted so far by the current processing run (None before the
+    /// first run reports progress; absent on items written by older versions).
+    #[serde(default)]
+    pub processed_pages: Option<i32>,
+    /// Total pages the current processing run will extract.
+    #[serde(default)]
+    pub total_pages: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -43,8 +50,22 @@ pub struct SubjectResponse {
     pub is_public: bool,
     pub r#type: SubjectType,
     pub processing_status: String,
+    #[serde(default)]
+    pub processed_pages: Option<i32>,
+    #[serde(default)]
+    pub total_pages: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// A subject with its chapters embedded, as returned by
+/// `GET /api/subjects/{id}/chapters`. The subject fields are flattened to the
+/// top level to match the pre-migration API shape the frontend consumes.
+#[derive(Debug, Serialize, Deserialize, Clone, utoipa::ToSchema)]
+pub struct SubjectDetailResponse {
+    #[serde(flatten)]
+    pub subject: SubjectResponse,
+    pub chapters: Vec<super::ChapterResponse>,
 }
 
 impl From<Subject> for SubjectResponse {
@@ -57,6 +78,8 @@ impl From<Subject> for SubjectResponse {
             is_public: subject.is_public,
             r#type: subject.r#type,
             processing_status: subject.processing_status,
+            processed_pages: subject.processed_pages,
+            total_pages: subject.total_pages,
             created_at: subject.created_at,
             updated_at: Some(subject.updated_at),
         }
