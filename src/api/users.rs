@@ -54,10 +54,10 @@ pub async fn get_myprofile(
     State(state): State<Arc<AppState>>,
     AuthUser(mut current_user): AuthUser,
 ) -> Result<Json<UserResponse>, AppError> {
-    if let Some(dp) = &current_user.dp {
-        if let Ok(url) = state.storage.get_presigned_url(dp, 3600).await {
-            current_user.dp = Some(url);
-        }
+    if let Some(dp) = &current_user.dp
+        && let Ok(url) = state.storage.get_presigned_url(dp, 3600).await
+    {
+        current_user.dp = Some(url);
     }
     Ok(Json(UserResponse::from(current_user)))
 }
@@ -83,10 +83,10 @@ pub async fn get_user(
         _ => return Err(AppError::NotFound("User not found".to_string())),
     };
 
-    if let Some(dp) = &user.dp {
-        if let Ok(url) = state.storage.get_presigned_url(dp, 3600).await {
-            user.dp = Some(url);
-        }
+    if let Some(dp) = &user.dp
+        && let Ok(url) = state.storage.get_presigned_url(dp, 3600).await
+    {
+        user.dp = Some(url);
     }
 
     Ok(Json(UserResponse::from(user)))
@@ -171,11 +171,24 @@ pub async fn update_user(
     let mut file_content = None;
     let mut file_ext = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|e: axum::extract::multipart::MultipartError| AppError::BadRequest(format!("Multipart error: {}", e)))? {
+    while let Some(field) =
+        multipart
+            .next_field()
+            .await
+            .map_err(|e: axum::extract::multipart::MultipartError| {
+                AppError::BadRequest(format!("Multipart error: {}", e))
+            })?
+    {
         let name = field.name().unwrap_or("").to_string();
 
         if name == "user_update" {
-            let data = field.text().await.map_err(|e: axum::extract::multipart::MultipartError| AppError::BadRequest(format!("Error reading user_update: {}", e)))?;
+            let data =
+                field
+                    .text()
+                    .await
+                    .map_err(|e: axum::extract::multipart::MultipartError| {
+                        AppError::BadRequest(format!("Error reading user_update: {}", e))
+                    })?;
             update_data = serde_json::from_str::<crate::models::UserUpdate>(&data).ok();
         } else if name == "dp" {
             let filename = field.file_name().unwrap_or("").to_string();
@@ -186,12 +199,22 @@ pub async fn update_user(
             } else if filename.to_lowercase().ends_with(".jpeg") {
                 file_ext = Some("jpeg".to_string());
             } else {
-                return Err(AppError::BadRequest("Invalid image format. Use jpg, png or jpeg".to_string()));
+                return Err(AppError::BadRequest(
+                    "Invalid image format. Use jpg, png or jpeg".to_string(),
+                ));
             }
 
-            let data = field.bytes().await.map_err(|e: axum::extract::multipart::MultipartError| AppError::BadRequest(format!("Error reading dp file: {}", e)))?;
+            let data =
+                field
+                    .bytes()
+                    .await
+                    .map_err(|e: axum::extract::multipart::MultipartError| {
+                        AppError::BadRequest(format!("Error reading dp file: {}", e))
+                    })?;
             if data.len() > 5 * 1024 * 1024 {
-                return Err(AppError::BadRequest("File size too large (max 5MB)".to_string()));
+                return Err(AppError::BadRequest(
+                    "File size too large (max 5MB)".to_string(),
+                ));
             }
             file_content = Some(data.to_vec());
         }
@@ -209,10 +232,10 @@ pub async fn update_user(
         }
     }
 
-    if let Some(update) = update_data {
-        if let Some(name) = update.full_name {
-            current_user.full_name = name;
-        }
+    if let Some(update) = update_data
+        && let Some(name) = update.full_name
+    {
+        current_user.full_name = name;
     }
 
     state
@@ -221,10 +244,10 @@ pub async fn update_user(
         .await
         .map_err(|e: anyhow::Error| AppError::InternalServerError(e))?;
 
-    if let Some(dp) = &current_user.dp {
-        if let Ok(url) = state.storage.get_presigned_url(dp, 3600).await {
-            current_user.dp = Some(url);
-        }
+    if let Some(dp) = &current_user.dp
+        && let Ok(url) = state.storage.get_presigned_url(dp, 3600).await
+    {
+        current_user.dp = Some(url);
     }
 
     Ok(Json(UserResponse::from(current_user)))

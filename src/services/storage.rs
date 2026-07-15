@@ -11,6 +11,21 @@ pub struct StorageService {
     region: String,
 }
 
+/// Infers the MIME type from the object key's extension so S3 serves files
+/// (especially audio behind presigned URLs) with a playable content type.
+fn content_type_for_key(key: &str) -> &'static str {
+    let extension = key.rsplit('.').next().unwrap_or("");
+    match extension.to_ascii_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => "application/octet-stream",
+    }
+}
+
 impl StorageService {
     pub async fn new(settings: &Settings) -> Self {
         let sdk_config = aws_config::defaults(BehaviorVersion::latest())
@@ -33,6 +48,7 @@ impl StorageService {
             .put_object()
             .bucket(&self.bucket_name)
             .key(key)
+            .content_type(content_type_for_key(key))
             .body(content.into())
             .send()
             .await?;
@@ -82,5 +98,34 @@ impl StorageService {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_type_inferred_from_extension() {
+        assert_eq!(
+            content_type_for_key("subjects/u1/s1.pdf"),
+            "application/pdf"
+        );
+        assert_eq!(content_type_for_key("audio/u1/c1/s1.wav"), "audio/wav");
+        assert_eq!(content_type_for_key("audio/u1/c1/s1.mp3"), "audio/mpeg");
+        assert_eq!(content_type_for_key("avatars/u1.JPG"), "image/jpeg");
+        assert_eq!(content_type_for_key("avatars/u1.png"), "image/png");
+    }
+
+    #[test]
+    fn content_type_defaults_to_octet_stream() {
+        assert_eq!(
+            content_type_for_key("no-extension"),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            content_type_for_key("weird.xyz"),
+            "application/octet-stream"
+        );
     }
 }

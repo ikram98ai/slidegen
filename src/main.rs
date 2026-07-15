@@ -5,16 +5,12 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod api;
-mod config;
-mod db;
-mod error;
-mod models;
-mod services;
-
-use crate::config::Settings;
-use crate::db::Database;
-use crate::services::{AIService, BackgroundTasksService, StorageService};
+use slidegen::AppState;
+use slidegen::api;
+use slidegen::config::Settings;
+use slidegen::db::Database;
+use slidegen::services::bg_tasks::JobQueue;
+use slidegen::services::{AIService, BackgroundTasksService, StorageService};
 
 use utoipa::{
     Modify, OpenApi,
@@ -60,6 +56,7 @@ impl Modify for SecurityAddon {
         api::subjects::get_subject_chapters,
         api::subjects::update_subject,
         api::subjects::delete_subject,
+        api::subjects::reprocess_subject,
         api::chapters::create_chapter,
         api::chapters::update_chapter,
         api::chapters::delete_chapter,
@@ -70,23 +67,24 @@ impl Modify for SecurityAddon {
     ),
     components(
         schemas(
-            crate::models::UserCreate,
-            crate::models::UserResponse,
+            slidegen::models::UserCreate,
+            slidegen::models::UserResponse,
             api::auth::LoginReq,
             api::auth::Token,
             api::auth::RefreshTokenReq,
-            crate::models::SubjectResponse,
-            crate::models::SubjectType,
-            crate::models::SubjectCreate,
-            crate::models::SubjectUpdate,
-            crate::models::ChapterCreate,
-            crate::models::ChapterUpdate,
-            crate::models::ChapterResponse,
-            crate::models::SlideCreate,
-            crate::models::SlideUpdate,
-            crate::models::SlideResponse,
-            crate::api::chapters::GenerativeResponse,
-            crate::models::UserUpdate,
+            slidegen::models::SubjectResponse,
+            slidegen::models::SubjectDetailResponse,
+            slidegen::models::SubjectType,
+            slidegen::models::SubjectCreate,
+            slidegen::models::SubjectUpdate,
+            slidegen::models::ChapterCreate,
+            slidegen::models::ChapterUpdate,
+            slidegen::models::ChapterResponse,
+            slidegen::models::SlideCreate,
+            slidegen::models::SlideUpdate,
+            slidegen::models::SlideResponse,
+            api::chapters::GenerativeResponse,
+            slidegen::models::UserUpdate,
         ),
     ),
     tags(
@@ -117,15 +115,6 @@ async fn health_check() -> Json<serde_json::Value> {
     Json(json!({"status": "healthy"}))
 }
 
-#[derive(Clone)]
-pub struct AppState {
-    pub settings: Settings,
-    pub db: Arc<Database>,
-    pub storage: Arc<StorageService>,
-    pub ai: Arc<AIService>,
-    pub bg_tasks: Arc<BackgroundTasksService>,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
@@ -137,14 +126,33 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let settings = Settings::new();
+    let on_lambda = std::env::var("AWS_LAMBDA_FUNCTION_NAME").is_ok();
 
     let db = Arc::new(Database::new(&settings).await);
     let storage = Arc::new(StorageService::new(&settings).await);
     let ai = Arc::new(AIService::new(&settings));
+
+    // With a queue configured, background jobs are sent to SQS and handled by
+    // the worker Lambda. Without one they run in-process via tokio::spawn,
+    // which is fine locally but stalls on Lambda once the response is sent.
+    let job_queue = match settings.jobs_queue_url.clone() {
+        Some(url) => Some(JobQueue::new(&settings, url).await),
+        None => {
+            if on_lambda {
+                tracing::warn!(
+                    "JOBS_QUEUE_URL is not set: background jobs will run in-process \
+                     and may stall when the Lambda environment freezes"
+                );
+            }
+            None
+        }
+    };
+
     let bg_tasks = Arc::new(BackgroundTasksService::new(
         db.clone(),
         storage.clone(),
         ai.clone(),
+        job_queue,
     ));
 
     let shared_state = Arc::new(AppState {
@@ -166,13 +174,14 @@ async fn main() -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(shared_state);
 
-    if std::env::var("AWS_LAMBDA_FUNCTION_NAME").is_ok() {
+    if on_lambda {
         tracing::info!("Running on AWS Lambda");
         lambda_http::run(app)
             .await
             .map_err(|e| anyhow::anyhow!("Lambda run error: {}", e))?;
     } else {
-        let listener = TcpListener::bind("0.0.0.0:8000").await?;
+        let port = std::env::var("PORT").unwrap_or_else(|_| "8000".to_string());
+        let listener = TcpListener::bind(format!("0.0.0.0:{port}")).await?;
         tracing::info!("listening on {}", listener.local_addr()?);
         axum::serve(listener, app).await?;
     }

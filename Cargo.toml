@@ -3,9 +3,17 @@ name = "slidegen"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "slidegen"
+path = "src/lib.rs"
+
 [[bin]]
 name = "slidegen"
 path = "src/main.rs"
+
+[[bin]]
+name = "worker"
+path = "src/worker.rs"
 
 [[bin]]
 name = "manage"
@@ -17,6 +25,8 @@ async-trait = "0.1.89"
 aws-config = "1.8.14"
 aws-sdk-dynamodb = { version = "1.107.0", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.124.0"
+aws-sdk-sqs = "1.101.0"
+aws_lambda_events = { version = "1.2.0", default-features = false, features = ["sqs"] }
 axum = { version = "0.8.8", features = ["multipart", "macros"] }
 axum-extra = { version = "0.12.5", features = ["typed-header"] }
 base64 = "0.22.1"
@@ -29,7 +39,7 @@ headers = "0.4.1"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 lambda_http = "1.0.2"
 lambda_runtime = "0.13.0"
-lopdf = "0.35.0"
+lopdf = { version = "0.44.0", default-features = false, features = ["chrono", "rayon"] }
 reqwest = { version = "0.13.2", features = ["json", "multipart"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_dynamo = { version = "4.3.0", features = ["aws-sdk-dynamodb+1"] }
@@ -43,3 +53,6 @@ utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 uuid = { version = "1.21.0", features = ["v4", "serde"] }
 validator = { version = "0.20.0", features = ["derive"] }
+
+[dev-dependencies]
+wiremock = "0.6"

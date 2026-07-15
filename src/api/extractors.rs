@@ -1,7 +1,4 @@
-use axum::{
-    extract::FromRequestParts,
-    http::{request::Parts},
-};
+use axum::{extract::FromRequestParts, http::request::Parts};
 use axum_extra::{
     TypedHeader,
     headers::{Authorization, authorization::Bearer},
@@ -25,11 +22,16 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
         let auth_header =
             match TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state).await {
                 Ok(TypedHeader(auth)) => auth,
-                Err(_) => return Err(AppError::Unauthorized("Missing or invalid authorization header".to_string())),
+                Err(_) => {
+                    return Err(AppError::Unauthorized(
+                        "Missing or invalid authorization header".to_string(),
+                    ));
+                }
             };
 
         let token = auth_header.token();
-        let claims = verify_token(token, &state.settings).map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+        let claims = verify_token(token, &state.settings)
+            .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
 
         if claims.r#type != "access" {
             return Err(AppError::Unauthorized("Invalid token type".to_string()));
@@ -39,11 +41,13 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
             .db
             .get_user_by_id(&claims.user_id)
             .await
-            .map_err(|e| AppError::InternalServerError(e.into()))?;
+            .map_err(AppError::InternalServerError)?;
 
         match user {
             Some(u) if u.is_active => Ok(AuthUser(u)),
-            _ => Err(AppError::Unauthorized("User not found or inactive".to_string())),
+            _ => Err(AppError::Unauthorized(
+                "User not found or inactive".to_string(),
+            )),
         }
     }
 }

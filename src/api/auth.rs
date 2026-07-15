@@ -46,11 +46,13 @@ pub async fn register(
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
     // Check if user exists
     if let Ok(Some(_)) = state.db.get_user_by_email(&payload.email).await {
-        return Err(AppError::BadRequest("User with this email already exists".to_string()));
+        return Err(AppError::BadRequest(
+            "User with this email already exists".to_string(),
+        ));
     }
 
-    let hashed_password =
-        get_password_hash(&payload.password).map_err(|e| AppError::InternalServerError(e.into()))?;
+    let hashed_password = get_password_hash(&payload.password)
+        .map_err(|e| AppError::InternalServerError(e.into()))?;
 
     let db_user = User {
         id: Uuid::new_v4().to_string(),
@@ -67,14 +69,14 @@ pub async fn register(
         .db
         .save_user(&db_user)
         .await
-        .map_err(|e| AppError::InternalServerError(e.into()))?;
+        .map_err(AppError::InternalServerError)?;
 
     Ok((StatusCode::CREATED, Json(UserResponse::from(db_user))))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct LoginReq {
-    pub email: String, 
+    pub email: String,
     pub password: String,
 }
 
@@ -94,15 +96,23 @@ pub async fn login(
 ) -> Result<Json<Token>, AppError> {
     let user = match state.db.get_user_by_email(&payload.email).await {
         Ok(Some(u)) => u,
-        _ => return Err(AppError::Unauthorized("Invalid email or password".to_string())),
+        _ => {
+            return Err(AppError::Unauthorized(
+                "Invalid email or password".to_string(),
+            ));
+        }
     };
 
     if !verify_password(&payload.password, &user.hashed_password) {
-        return Err(AppError::Unauthorized("Invalid email or password".to_string()));
+        return Err(AppError::Unauthorized(
+            "Invalid email or password".to_string(),
+        ));
     }
 
     if !user.is_active {
-        return Err(AppError::Forbidden("Your account is deactivated".to_string()));
+        return Err(AppError::Forbidden(
+            "Your account is deactivated".to_string(),
+        ));
     }
 
     let access_token = create_access_token(&user.id, &state.settings)
@@ -146,7 +156,9 @@ pub async fn refresh_token(
     };
 
     if !user.is_active {
-        return Err(AppError::Forbidden("Your account is deactivated".to_string()));
+        return Err(AppError::Forbidden(
+            "Your account is deactivated".to_string(),
+        ));
     }
 
     let access_token = create_access_token(&user.id, &state.settings)

@@ -5,6 +5,8 @@
 //!   cargo run --bin manage -- db delete-tables
 //!   cargo run --bin manage -- s3 create-bucket
 //!   cargo run --bin manage -- s3 delete-bucket
+//!   cargo run --bin manage -- sqs create-queue
+//!   cargo run --bin manage -- sqs delete-queue
 
 use anyhow::{Context, Result};
 use aws_config::{BehaviorVersion, Region};
@@ -16,6 +18,7 @@ use aws_sdk_dynamodb::{
     },
 };
 use aws_sdk_s3::client::Client as S3Client;
+use aws_sdk_sqs::client::Client as SqsClient;
 use clap::{Parser, Subcommand};
 use dotenvy::dotenv;
 use serde_json::json;
@@ -46,6 +49,11 @@ enum Group {
         #[command(subcommand)]
         cmd: S3Command,
     },
+    /// SQS background-jobs queue management
+    Sqs {
+        #[command(subcommand)]
+        cmd: SqsCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -62,6 +70,14 @@ enum S3Command {
     CreateBucket,
     /// Delete the S3 bucket and all its contents
     DeleteBucket,
+}
+
+#[derive(Subcommand)]
+enum SqsCommand {
+    /// Create the background-jobs queue (plus its dead-letter queue)
+    CreateQueue,
+    /// Delete the background-jobs queue and its dead-letter queue
+    DeleteQueue,
 }
 
 // ──────────────────────────── DynamoDB helpers ─────────────────────────────
@@ -272,6 +288,12 @@ async fn create_bucket(s3: &S3Client, bucket: &str, region: &str) -> Result<()> 
         BucketLocationConstraint, CreateBucketConfiguration, PublicAccessBlockConfiguration,
     };
 
+    // Idempotent: skip if we already own the bucket
+    if s3.head_bucket().bucket(bucket).send().await.is_ok() {
+        println!("Bucket '{}' already exists — skipping.", bucket);
+        return Ok(());
+    }
+
     println!("Creating bucket '{}'...", bucket);
 
     // Create bucket (us-east-1 must NOT send a LocationConstraint, others must)
@@ -415,6 +437,108 @@ async fn delete_bucket(s3: &S3Client, bucket: &str) -> Result<()> {
     Ok(())
 }
 
+// ──────────────────────────── SQS helpers ─────────────────────────────────
+
+const JOBS_QUEUE_NAME: &str = "slidegen-jobs";
+const JOBS_DLQ_NAME: &str = "slidegen-jobs-dlq";
+
+async fn create_queue(sqs: &SqsClient) -> Result<()> {
+    use aws_sdk_sqs::types::QueueAttributeName;
+
+    // 1. Dead-letter queue for jobs that keep failing
+    println!("Creating dead-letter queue '{}'...", JOBS_DLQ_NAME);
+    let dlq = sqs
+        .create_queue()
+        .queue_name(JOBS_DLQ_NAME)
+        .send()
+        .await
+        .context("Failed to create dead-letter queue")?;
+    let dlq_url = dlq.queue_url().context("DLQ has no URL")?.to_string();
+
+    let dlq_attrs = sqs
+        .get_queue_attributes()
+        .queue_url(&dlq_url)
+        .attribute_names(QueueAttributeName::QueueArn)
+        .send()
+        .await
+        .context("Failed to read DLQ attributes")?;
+    let dlq_arn = dlq_attrs
+        .attributes()
+        .and_then(|a| a.get(&QueueAttributeName::QueueArn))
+        .context("DLQ has no ARN")?
+        .to_string();
+    println!("✓ Dead-letter queue ready ({}).", dlq_arn);
+
+    // 2. Main jobs queue. Visibility timeout must exceed the worker Lambda's
+    // timeout (AI jobs can run for minutes), and failed jobs move to the DLQ
+    // after 3 attempts.
+    println!("Creating jobs queue '{}'...", JOBS_QUEUE_NAME);
+    let redrive_policy = json!({
+        "deadLetterTargetArn": dlq_arn,
+        "maxReceiveCount": "3",
+    })
+    .to_string();
+
+    let queue = sqs
+        .create_queue()
+        .queue_name(JOBS_QUEUE_NAME)
+        .attributes(QueueAttributeName::VisibilityTimeout, "900")
+        .attributes(QueueAttributeName::RedrivePolicy, redrive_policy)
+        .send()
+        .await
+        .context("Failed to create jobs queue")?;
+    let queue_url = queue.queue_url().context("Queue has no URL")?.to_string();
+
+    let queue_attrs = sqs
+        .get_queue_attributes()
+        .queue_url(&queue_url)
+        .attribute_names(QueueAttributeName::QueueArn)
+        .send()
+        .await
+        .context("Failed to read queue attributes")?;
+    let queue_arn = queue_attrs
+        .attributes()
+        .and_then(|a| a.get(&QueueAttributeName::QueueArn))
+        .context("Queue has no ARN")?
+        .to_string();
+
+    println!("✓ Jobs queue created.");
+    println!();
+    println!("Queue URL: {}", queue_url);
+    println!("Queue ARN: {}", queue_arn);
+    println!();
+    println!("Next steps:");
+    println!("  1. Set JOBS_QUEUE_URL={} on the API Lambda.", queue_url);
+    println!("  2. Connect the worker Lambda to the queue:");
+    println!(
+        "     aws lambda create-event-source-mapping \\\n       --function-name slidegen-worker \\\n       --event-source-arn {} \\\n       --batch-size 1 \\\n       --function-response-types ReportBatchItemFailures",
+        queue_arn
+    );
+
+    Ok(())
+}
+
+async fn delete_queue(sqs: &SqsClient) -> Result<()> {
+    for name in [JOBS_QUEUE_NAME, JOBS_DLQ_NAME] {
+        match sqs.get_queue_url().queue_name(name).send().await {
+            Ok(resp) => {
+                let url = resp.queue_url().context("Queue has no URL")?.to_string();
+                println!("Deleting queue '{}'...", name);
+                sqs.delete_queue()
+                    .queue_url(&url)
+                    .send()
+                    .await
+                    .with_context(|| format!("Failed to delete queue '{}'", name))?;
+                println!("✓ Queue '{}' deleted.", name);
+            }
+            Err(_) => {
+                println!("Queue '{}' does not exist — skipping.", name);
+            }
+        }
+    }
+    Ok(())
+}
+
 // ──────────────────────────── Entry point ─────────────────────────────────
 
 #[tokio::main]
@@ -432,6 +556,7 @@ async fn main() -> Result<()> {
 
     let dynamo = DynamoClient::new(&sdk_config);
     let s3 = S3Client::new(&sdk_config);
+    let sqs = SqsClient::new(&sdk_config);
 
     let cli = Cli::parse();
 
@@ -443,6 +568,10 @@ async fn main() -> Result<()> {
         Group::S3 { cmd } => match cmd {
             S3Command::CreateBucket => create_bucket(&s3, &s3_bucket, &aws_region).await?,
             S3Command::DeleteBucket => delete_bucket(&s3, &s3_bucket).await?,
+        },
+        Group::Sqs { cmd } => match cmd {
+            SqsCommand::CreateQueue => create_queue(&sqs).await?,
+            SqsCommand::DeleteQueue => delete_queue(&sqs).await?,
         },
     }
 

@@ -8,6 +8,9 @@ pub struct Settings {
     pub aws_secret_access_key: Option<String>,
     pub aws_region: String,
     pub s3_bucket_name: String,
+    /// SQS queue for background jobs. When unset, jobs run in-process
+    /// (fine locally, unreliable on Lambda).
+    pub jobs_queue_url: Option<String>,
 
     // Security
     pub debug: bool,
@@ -22,7 +25,14 @@ pub struct Settings {
     pub embedding_model: String,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Settings {
+    /// Loads settings from the environment (and `.env` if present).
     pub fn new() -> Self {
         dotenv().ok(); // Ignore if .env not found
 
@@ -31,6 +41,7 @@ impl Settings {
             aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").ok(),
             aws_region: env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
             s3_bucket_name: env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set"),
+            jobs_queue_url: env::var("JOBS_QUEUE_URL").ok().filter(|v| !v.is_empty()),
 
             debug: env::var("DEBUG")
                 .unwrap_or_else(|_| "true".to_string())
