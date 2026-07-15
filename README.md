@@ -88,6 +88,9 @@ make create-tables
 
 # Create the primary S3 bucket for files
 make create-bucket
+
+# Create the SQS queue for background jobs (also creates a dead-letter queue)
+make create-queue
 ```
 
 ### Resource Teardown
@@ -98,6 +101,9 @@ make delete-tables
 
 # Delete S3 bucket and all its contents
 make delete-bucket
+
+# Delete SQS queues (jobs queue and DLQ)
+make delete-queue
 ```
 
 ---
@@ -122,6 +128,86 @@ Builds the React app with the correct API URL and syncs to S3:
 make deploy-web
 ```
 
+### 3. CI/CD (GitHub Actions)
+
+Two workflows live in `.github/workflows/`:
+
+- **`ci.yml`** — runs on every pull request: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, plus frontend lint/typecheck/build.
+- **`deploy.yml`** — runs on every push to `main` (or manually via the Actions tab). It re-runs the full CI gate, then builds the backend with `cargo lambda` (arm64), updates the Lambda function code, smoke-tests `/health`, builds the frontend with the production `VITE_API_URL`, syncs it to S3, and invalidates CloudFront.
+
+Configure these in **Settings → Secrets and variables → Actions**:
+
+| Kind | Name | Purpose |
+| --- | --- | --- |
+| Secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Deploy credentials (Lambda update, web bucket write, CloudFront invalidation) |
+| Variable | `VITE_API_URL` | Public API base URL (Lambda function URL); also used for the health smoke test |
+| Variable | `WEB_BUCKET_NAME` | S3 bucket hosting the frontend |
+| Variable | `AWS_REGION` | Optional, defaults to `us-east-1` |
+| Variable | `LAMBDA_FUNCTION_NAME` | Optional, defaults to `slidegen-lambda` |
+| Variable | `CLOUDFRONT_DISTRIBUTION_ID` | Optional; invalidation is skipped when unset |
+
+The pipeline only updates code. One-time provisioning (Lambda creation, DynamoDB tables, S3 buckets, SQS queue, Lambda runtime env vars such as `S3_BUCKET_NAME`, `SECRET_KEY`, `GEMINI_API_KEY`, `JOBS_QUEUE_URL`) is done via the `makefile` targets.
+
+---
+
+## Background Jobs (SQS + Worker Lambda)
+
+Long-running AI work (TOC analysis, slide + audio generation) cannot run in-process on Lambda — the execution environment freezes as soon as the HTTP response is sent. Instead:
+
+- **Locally** (no `JOBS_QUEUE_URL` set): jobs run in-process via `tokio::spawn` — zero setup for development.
+- **In production**: the API Lambda enqueues a JSON `Job` message to SQS; a second Lambda (`worker` binary) consumes the queue, executes the job, and reports per-message failures so SQS retries only what failed. After 3 failed attempts a job lands in the dead-letter queue.
+
+All of this is wired automatically by `make bootstrap` (see below). To do it manually instead:
+
+```bash
+# 1. Create the jobs queue + DLQ (prints the queue URL and the
+#    aws lambda create-event-source-mapping command to run)
+make create-queue
+
+# 2. Create/update the worker Lambda
+make build && make deploy-worker
+
+# 3. Set JOBS_QUEUE_URL=<queue url> on the API Lambda's environment,
+#    and give it sqs:SendMessage; give the worker the same runtime env
+#    (S3_BUCKET_NAME, SECRET_KEY, GEMINI_API_KEY, ...) plus DynamoDB/S3 access.
+```
+
+---
+
+## One-Command Provisioning & Teardown
+
+With a filled-in `.env` and an authenticated AWS CLI:
+
+```bash
+make bootstrap   # zero → fully wired stack (idempotent, safe to re-run)
+make teardown    # destroys the whole stack (asks for confirmation; DELETES ALL DATA)
+```
+
+`make bootstrap` ([scripts/bootstrap.sh](scripts/bootstrap.sh)) creates, in order: DynamoDB tables, the files S3 bucket, the SQS jobs queue + DLQ, a shared IAM role (DynamoDB/S3/SQS/logs), builds and deploys both Lambda functions (arm64), sets their env vars/timeouts/memory, connects the queue to the worker with `ReportBatchItemFailures`, exposes a public function URL for the API, and (if `WEB_BUCKET_NAME` is set) prepares the web hosting bucket. It finishes by printing the API URL and the exact GitHub Actions secrets/variables to configure for CI/CD.
+
+`make teardown` ([scripts/teardown.sh](scripts/teardown.sh)) removes all of the above in reverse order — event source mapping, both Lambdas, the IAM role, queues, tables, and buckets **including all data**. It requires typing `destroy` to confirm (`FORCE=1` skips the prompt for automation). CloudFront distributions and CloudWatch log groups are intentionally left for manual cleanup.
+
+---
+
+## Testing
+
+Tests are split by Rust convention:
+
+- **Unit tests** live next to the code in `#[cfg(test)]` modules (private helpers: JSON extraction, WAV encoding, UTF-8 truncation, content types).
+- **Integration tests** live in [`tests/`](tests/): `ai_service_test.rs` (AI service against a mocked Gemini API via wiremock), `auth_service_test.rs` (JWT + password hashing), `job_format_test.rs` (SQS job wire-format contract).
+
+Makefile shortcuts for development:
+
+```bash
+make test         # everything (unit + integration)
+make test-unit    # unit tests only
+make test-int     # integration tests only
+make test-ai      # just the AI service suite
+make test-one t=analyze_book_toc   # single test by name, with output
+make test-watch   # re-run on file change (needs cargo-watch)
+make check        # exactly what CI runs: fmt, clippy -D warnings, tests, web build
+```
+
 ---
 
 ## Directory Structure
@@ -131,8 +217,11 @@ make deploy-web
   - `models/`: Data structures and `utoipa::ToSchema` definitions.
   - `services/`: Core logic (AI, Auth, Storage, Background Tasks).
   - `db/`: DynamoDB client and data access layers.
-  - `main.rs`: Application entry point (Hybrid TCP/Lambda server).
+  - `lib.rs`: Library root (shared by all binaries and integration tests).
+  - `main.rs`: API entry point (Hybrid TCP/Lambda server).
+  - `worker.rs`: SQS background-jobs worker Lambda.
   - `manage.rs`: Infrastructure management CLI.
+- `tests/`: Integration tests (AI service, auth, job wire format).
 - `web/`: Frontend React application code.
 - `makefile`: Command shorthands for development and deployment.
 - `Dockerfile`: (Legacy) Used for optional containerized builds.

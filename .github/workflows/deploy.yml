@@ -1,0 +1,182 @@
+# Production deployment: backend to AWS Lambda (arm64), frontend to S3 + CloudFront.
+# Runs on every push to main after the full CI gate passes, or manually via
+# the Actions tab (workflow_dispatch).
+#
+# Required repository SECRETS (Settings → Secrets and variables → Actions):
+#   AWS_ACCESS_KEY_ID       IAM user/key allowed to update the Lambda, write to
+#   AWS_SECRET_ACCESS_KEY   the web bucket, and create CloudFront invalidations.
+#                           (Prefer OIDC — see the commented block below.)
+#
+# Required repository VARIABLES:
+#   VITE_API_URL                Public base URL of the API (Lambda function URL or
+#                               API Gateway stage), e.g. https://xxxx.lambda-url.us-east-1.on.aws
+#                               Used both to build the frontend and to smoke-test /health.
+#   WEB_BUCKET_NAME             S3 bucket that hosts the built frontend.
+#   AWS_REGION                  Optional, defaults to us-east-1.
+#   LAMBDA_FUNCTION_NAME        Optional, defaults to slidegen-lambda.
+#   WORKER_FUNCTION_NAME        Optional, defaults to slidegen-worker. The deploy step
+#                               is skipped (with a warning) if the function doesn't exist.
+#   CLOUDFRONT_DISTRIBUTION_ID  Optional; invalidation is skipped when unset.
+#
+# One-time setup (not done by this pipeline): run `make bootstrap` locally.
+# It provisions tables, buckets, the jobs queue, the IAM role, both Lambda
+# functions (env vars, timeouts, event source mapping, function URL) and
+# prints the secrets/variables to configure here. `make teardown` reverses it.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two production deploys at once; queue instead of cancelling so a
+# merged commit is never left half-deployed.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: Quality gate
+    uses: ./.github/workflows/ci.yml
+
+  deploy-backend:
+    name: Deploy API to AWS Lambda
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'slidegen-lambda' }}
+      WORKER_FUNCTION_NAME: ${{ vars.WORKER_FUNCTION_NAME || 'slidegen-worker' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: lambda-arm64
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The pip package bundles zig, which cargo-lambda uses to cross-compile
+      # to aarch64 (Graviton) from the x86_64 runner.
+      - name: Install cargo-lambda
+        run: pip install cargo-lambda
+
+      - name: Build Lambda binaries (arm64)
+        run: cargo lambda build --release --arm64 --bin slidegen --bin worker --output-format zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          # Preferred alternative — OIDC, no long-lived keys (also add
+          # `permissions: id-token: write` at the top of this file):
+          # role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+      - name: Update API Lambda function code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --zip-file fileb://target/lambda/slidegen/bootstrap.zip \
+            --no-cli-pager
+          aws lambda wait function-updated --function-name "$LAMBDA_FUNCTION_NAME"
+
+      - name: Update worker Lambda function code
+        run: |
+          if aws lambda get-function --function-name "$WORKER_FUNCTION_NAME" --no-cli-pager > /dev/null 2>&1; then
+            aws lambda update-function-code \
+              --function-name "$WORKER_FUNCTION_NAME" \
+              --zip-file fileb://target/lambda/worker/bootstrap.zip \
+              --no-cli-pager
+            aws lambda wait function-updated --function-name "$WORKER_FUNCTION_NAME"
+          else
+            echo "::warning::Worker Lambda '$WORKER_FUNCTION_NAME' not found — skipping." \
+                 "Background jobs will not run on Lambda until it exists." \
+                 "Create it once with: make build && make deploy-worker && make create-queue"
+          fi
+
+      - name: Smoke test /health
+        if: vars.VITE_API_URL != ''
+        run: |
+          for i in 1 2 3; do
+            if curl --fail --silent --show-error --max-time 30 "${{ vars.VITE_API_URL }}/health"; then
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "Health check failed after 3 attempts." >&2
+          exit 1
+
+  deploy-frontend:
+    name: Deploy frontend to S3 + CloudFront
+    # Backend deploys first so a frontend built against new API behavior never
+    # points at an old backend.
+    needs: [ci, deploy-backend]
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      WEB_BUCKET: ${{ vars.WEB_BUCKET_NAME }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build with production API URL
+        run: pnpm build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Hashed assets are immutable and cached for a year; index.html is never
+      # cached so new releases are picked up immediately.
+      - name: Sync build to S3
+        run: |
+          aws s3 sync dist/ "s3://$WEB_BUCKET" --delete \
+            --cache-control 'max-age=31536000, public, immutable' \
+            --exclude 'index.html'
+          aws s3 cp dist/index.html "s3://$WEB_BUCKET/index.html" \
+            --cache-control 'no-cache, no-store, must-revalidate'
+
+      - name: Invalidate CloudFront
+        if: vars.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths '/*' \
+            --no-cli-pager
