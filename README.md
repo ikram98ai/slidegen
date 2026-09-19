@@ -1,8 +1,8 @@
-# Slidegen - Project Documentation
+# Slidegen
 
-## Overview
+Slidegen turns an uploaded book into **interactive chapter packages**: a typed SceneSpec compiled to self-contained HTML (kit + player + CSS), stored on S3, and played in a sandboxed iframe. Gemini never writes raw HTML. Quotes are verified against the page extract before compile.
 
-Slidegen is an advanced educational platform designed to generate and manage slides from uploaded files. It leverages Rust for high-performance processing and Generative AI (Google Gemini) for intelligent content extraction and slide generation.
+The slidegen UI uses JWT. Sibling backends (khaneducation, knoio, …) use `X-Api-Key` and the `/api/v1` service API.
 
 ## Technology Stack
 
@@ -11,25 +11,24 @@ Slidegen is an advanced educational platform designed to generate and manage sli
 - **Language:** Rust (2024 Edition)
 - **Framework:** [Axum](https://github.com/tokio-rs/axum)
 - **Runtime:**
-  - **Local:** Tokio (TCP Listener)
-  - **Cloud:** AWS Lambda ([lambda_http](https://github.com/awslabs/aws-lambda-rust-runtime))
-- **Documentation:** [Utoipa](https://github.com/juhakivekas/utoipa) for OpenAPI 3.0 generation and Swagger UI.
-- **Data Storage:**
-  - **Database:** AWS DynamoDB (Managed via `manage` CLI).
-  - **File Storage:** AWS S3 for subject files and generated assets.
-- **AI Integration:** Google Gemini.
+  - **API:** Tokio locally; AWS Lambda (`lambda_http`) in production
+  - **Worker:** same `worker` binary on Lambda (SQS event source) or Fargate (long-poll)
+- **Documentation:** [Utoipa](https://github.com/juhakivekas/utoipa) OpenAPI 3 + Swagger UI
+- **Storage:** DynamoDB (users, subjects, chapters, slides, jobs); S3 (source PDF, extract pages, chapter packages, audio)
+- **Queue / events:** SQS work queue + optional EventBridge fan-out (`book.processed`, `chapter.ready`, `job.failed`)
+- **AI:** Google Gemini (text, TTS, embeddings)
+- **Retrieval (optional):** Qdrant; lexical fallback over the extract when `QDRANT_URL` is unset
 
 ### Frontend (`web/`)
 
 - **Framework:** React + Vite
-- **Styling:** Vanilla CSS (Modern, premium aesthetics)
-- **Hosting:** S3 Static Web Hosting + CloudFront CDN.
+- **Reader:** sandboxed iframe of the compiled chapter (`allow-scripts`, `allow="autoplay"`)
+- **Hosting:** S3 + CloudFront
 
-### Infrastructure & Deployment
+### Infrastructure
 
-- **Deployment Strategy:** Custom Bash scripts using AWS CLI and `cargo-lambda`.
-- **Backend Context:** Zip-based Lambda deployment (no Docker required for Lambda).
-- **Security:** JWT-based Authentication, IAM OAC for CloudFront-to-S3 security.
+- Custom Bash + AWS CLI + `cargo-lambda` (`make bootstrap`)
+- Optional Fargate Spot worker: `Dockerfile` + `deploy/fargate-worker.json`
 
 ---
 
@@ -37,202 +36,174 @@ Slidegen is an advanced educational platform designed to generate and manage sli
 
 ### Prerequisites
 
-- **Rust:** Latest stable version.
-- **Node.js & npm:** For frontend development.
-- **AWS CLI:** Configured with credentials.
-- **Cargo Lambda:** (Optional, for testing Lambda builds) `pip install cargo-lambda`.
+- Rust (stable), Node.js + pnpm, AWS CLI with credentials
+- Optional: `cargo-lambda` for Lambda builds
 
 ### Environment Setup
 
-1. Copy `.env.example` to `.env` in the root directory.
-2. Fill in the required values:
-   - `GEMINI_API_KEY`: Your Google Gemini API key.
-   - `SECRET_KEY`: A secure random string for JWT (e.g., `openssl rand -base64 32`).
-   - `AWS_REGION`: Your target AWS region.
-   - `AWS_ACCOUNT_ID`: Your 12-digit AWS account ID.
-   - `S3_BUCKET_NAME`: Bucket for file storage.
-   - `WEB_BUCKET_NAME`: Bucket for frontend hosting.
+1. Copy `.env.example` to `.env`.
+2. Required:
+   - `GEMINI_API_KEY`, `SECRET_KEY` (`openssl rand -base64 32`), `S3_BUCKET_NAME`
+   - `AWS_REGION`, `AWS_ACCOUNT_ID`
+3. Optional:
+   - `JOBS_QUEUE_URL` — unset locally so jobs run in-process
+   - `SERVICE_API_KEYS=khaneducation:sk_…,knoio:sk_…` — tenant keys for `/api/v1`
+   - `EVENT_BUS_NAME` — outbound EventBridge
+   - `AUTO_GENERATE_CHAPTERS` — default `true`; set `false` to skip sequential chapter jobs after TOC
+   - `QDRANT_URL` / `QDRANT_API_KEY` / `QDRANT_COLLECTION` — vector search (else lexical Ask)
+   - `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` — default `gemini-embedding-001` / `768`
 
-### Running the App Locally
+### Running locally
 
-The project uses a `makefile` to streamline commands.
+```bash
+make run          # API at http://localhost:8000  (Swagger: /swagger-ui)
+cd web && pnpm dev
+```
 
-- **Start API (Local Dev):**
+---
 
-  ```bash
-  make dev
-  ```
+## Product pipeline
 
-  API is available at `http://localhost:8000`.
-  Swagger UI is at `http://localhost:8000/swagger-ui`.
+1. **Ingest** a PDF (UI upload or `POST /api/v1/books`).
+2. **Extract** every page to S3 (`paragraph_id` like `p12-2`, printed-page offset).
+3. **TOC** → chapter rows.
+4. **GenerateChapter** (one at a time when `AUTO_GENERATE_CHAPTERS` is on): plan scenes from retrieved paragraphs, generate SceneSpec, verify citations, TTS for depth text, compile HTML, upload package.
+5. **Index** paragraphs (Gemini embeddings → Qdrant when configured).
+6. **Play** via a short-lived presigned embed URL in a cross-origin iframe.
 
-- **Start Frontend:**
-  ```bash
-  make dev-web
-  ```
-  Web UI is available at `http://localhost:5173`.
+Legacy **GenerateSlides** still exists for old queue messages and `POST /api/chapters/{subject}/{chapter}/slides/generate`. The UI and `POST …/generate` start **GenerateChapter**.
+
+---
+
+## Service API (`/api/v1`)
+
+Authenticate with `X-Api-Key` (value from `SERVICE_API_KEYS`).
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/books` | Multipart upload + process job |
+| POST | `/api/v1/books/ingest` | Book already in S3 (`file_s3path`) |
+| GET | `/api/v1/jobs/{id}` | Job progress |
+| GET | `/api/v1/books/{id}` | Book |
+| GET | `/api/v1/books/{id}/chapters` | TOC + per-chapter status |
+| GET | `/api/v1/books/{id}/chapters/{cid}` | Chapter + optional `embed_url` |
+| GET | `/api/v1/books/{id}/chapters/{cid}/embed` | Presigned iframe URL |
+| POST | `/api/v1/books/{id}/chapters/{cid}/generate` | Enqueue GenerateChapter |
+| POST | `/api/v1/books/{id}/search` | Cited passages (vector or lexical) |
+| POST | `/api/v1/books/{id}/chapters/{cid}/ask` | Grounded answer + citations |
+| GET | `/api/v1/books/{id}/chapters/{cid}/scenes/{sid}` | SceneSpec |
+| GET | `/api/v1/books/{id}/paragraphs/{pid}` | Paragraph + page |
+
+JWT users poll the same jobs at `GET /api/jobs/{id}` and generate via `POST /api/chapters/{subject}/{chapter}/generate`.
+
+Inbound SQS (skip HTTP): `{"type":"ingest_book","tenant_id":"khan","title":"…","book_type":"book","file_s3path":"…"}`.
+
+---
+
+## MCP
+
+`slidegen-mcp` is a stdio MCP server wrapping the v1 API.
+
+```bash
+SLIDEGEN_BASE_URL=http://127.0.0.1:8000 SLIDEGEN_API_KEY=sk_… cargo run --bin slidegen-mcp
+```
+
+Tools: `search_book`, `get_chapter`, `get_scene`, `get_citation`. Every result includes page / `paragraph_id`.
 
 ---
 
 ## Infrastructure Management
 
-The `manage` CLI tool (built in Rust) for managing AWS resources.
-
-### Database & Storage Setup
-
-Before your first run, you must create the necessary DynamoDB tables and S3 buckets:
-
 ```bash
-# Create all DynamoDB tables (Users, Subjects, Chapters, Slides)
-make create-tables
-
-# Create the primary S3 bucket for files
+make create-tables   # Users, Subjects, Chapters, Slides, Jobs
 make create-bucket
-
-# Create the SQS queue for background jobs (also creates a dead-letter queue)
-make create-queue
+make create-queue    # jobs queue + DLQ
+make delete-tables
+make delete-bucket
+make delete-queue
 ```
 
-### Resource Teardown
+---
+
+## Background jobs
+
+Long-running work cannot stay in-process on the API Lambda (the runtime freezes after the HTTP response).
+
+- **Local** (no `JOBS_QUEUE_URL`): in-process job channel.
+- **Production API**: writes `slidegen_jobs`, enqueues SQS.
+- **Worker Lambda:** SQS event source, `ReportBatchItemFailures`, 900s timeout. After 3 failures the message goes to the DLQ.
+- **Worker Fargate:** same binary long-polls SQS when `AWS_LAMBDA_RUNTIME_API` is unset. `JOBS_QUEUE_URL` is required. `make docker-worker` builds the image; register `deploy/fargate-worker.json` (Spot, scale 0–N on queue depth).
+
+Job types: `process_subject`, `generate_chapter`, `generate_slides` (legacy), `ingest_book`.
+
+Poll `GET /api/jobs/{job_id}` (JWT or `X-Api-Key`). Optional EventBridge (`EVENT_BUS_NAME`) notifies siblings so they do not share the work queue.
 
 ```bash
-# Delete all tables
-make delete-tables
-
-# Delete S3 bucket and all its contents
-make delete-bucket
-
-# Delete SQS queues (jobs queue and DLQ)
-make delete-queue
+make create-queue
+make build && make deploy-worker
+# Set JOBS_QUEUE_URL on API and worker; worker also needs DynamoDB/S3/SQS (and events:PutEvents if using EventBridge).
 ```
 
 ---
 
 ## Deployment
 
-Deployment has been migrated from Pulumi to custom high-performance scripts.
-
-### 1. Deploy Backend
-
-Cross-compiles for Lambda and updates the function:
-
 ```bash
-make deploy
+make deploy          # API Lambda
+make deploy-worker   # worker Lambda
+make deploy-web      # React → S3
+make docker-worker   # worker container for Fargate
 ```
 
-### 2. Deploy Frontend
+### CI/CD (GitHub Actions)
 
-Builds the React app with the correct API URL and syncs to S3:
-
-```bash
-make deploy-web
-```
-
-### 3. CI/CD (GitHub Actions)
-
-Two workflows live in `.github/workflows/`:
-
-- **`ci.yml`** — runs on every pull request: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, plus frontend lint/typecheck/build.
-- **`deploy.yml`** — runs on every push to `main` (or manually via the Actions tab). It re-runs the full CI gate, then builds the backend with `cargo lambda` (arm64), updates the Lambda function code, smoke-tests `/health`, builds the frontend with the production `VITE_API_URL`, syncs it to S3, and invalidates CloudFront.
-
-Configure these in **Settings → Secrets and variables → Actions**:
+- **`ci.yml`** — PR: `cargo fmt --check`, `clippy -D warnings`, `cargo test`, frontend lint/typecheck/build.
+- **`deploy.yml`** — push to `main`: CI, `cargo lambda` arm64, update API Lambda, smoke `/health`, sync web, CloudFront invalidate.
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
-| Secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Deploy credentials (Lambda update, web bucket write, CloudFront invalidation) |
-| Variable | `VITE_API_URL` | Public API base URL (Lambda function URL); also used for the health smoke test |
-| Variable | `WEB_BUCKET_NAME` | S3 bucket hosting the frontend |
-| Variable | `AWS_REGION` | Optional, defaults to `us-east-1` |
-| Variable | `LAMBDA_FUNCTION_NAME` | Optional, defaults to `slidegen-lambda` |
-| Variable | `CLOUDFRONT_DISTRIBUTION_ID` | Optional; invalidation is skipped when unset |
+| Secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Deploy |
+| Variable | `VITE_API_URL` | Public API URL + health check |
+| Variable | `WEB_BUCKET_NAME` | Frontend bucket |
+| Variable | `AWS_REGION` | Optional, default `us-east-1` |
+| Variable | `LAMBDA_FUNCTION_NAME` | Optional, default `slidegen-lambda` |
+| Variable | `CLOUDFRONT_DISTRIBUTION_ID` | Optional |
 
-The pipeline only updates code. One-time provisioning (Lambda creation, DynamoDB tables, S3 buckets, SQS queue, Lambda runtime env vars such as `S3_BUCKET_NAME`, `SECRET_KEY`, `GEMINI_API_KEY`, `JOBS_QUEUE_URL`) is done via the `makefile` targets.
-
----
-
-## Background Jobs (SQS + Worker Lambda)
-
-Long-running AI work (full-book extract, TOC analysis, slide + audio generation) cannot run in-process on Lambda — the execution environment freezes as soon as the HTTP response is sent. Instead:
-
-- **Locally** (no `JOBS_QUEUE_URL` set): jobs run in-process via `tokio::spawn` — zero setup for development.
-- **In production**: the API Lambda writes a row to `slidegen_jobs` and enqueues a JSON `Job` message to SQS; a second Lambda (`worker` binary) consumes the queue, updates that row as it extracts every PDF page (paragraph IDs + printed-page offset), and reports per-message failures so SQS retries only what failed. After 3 failed attempts a job lands in the dead-letter queue.
-
-Poll progress with `GET /api/jobs/{job_id}` (user JWT or `X-Api-Key`). Sibling backends ingest a book with `POST /api/v1/books` (multipart) or `POST /api/v1/books/ingest` (`file_s3path` already in the bucket). Configure keys as `SERVICE_API_KEYS=khaneducation:sk_…,knoio:sk_…`.
-
-All of this is wired automatically by `make bootstrap` (see below). To do it manually instead:
+One-time provisioning (tables, buckets, queue, Lambda env: `S3_BUCKET_NAME`, `SECRET_KEY`, `GEMINI_API_KEY`, `JOBS_QUEUE_URL`, optional `SERVICE_API_KEYS` / `EVENT_BUS_NAME` / `QDRANT_*`) is `make bootstrap`, not CI.
 
 ```bash
-# 1. Create the jobs queue + DLQ (prints the queue URL and the
-#    aws lambda create-event-source-mapping command to run)
-make create-queue
-
-# 2. Create/update the worker Lambda
-make build && make deploy-worker
-
-# 3. Set JOBS_QUEUE_URL=<queue url> on the API Lambda's environment,
-#    and give it sqs:SendMessage; give the worker the same runtime env
-#    (S3_BUCKET_NAME, SECRET_KEY, GEMINI_API_KEY, ...) plus DynamoDB/S3 access.
+make bootstrap   # idempotent full stack
+make teardown    # type `destroy` (or FORCE=1); deletes data. CloudFront/logs left for manual cleanup.
 ```
-
----
-
-## One-Command Provisioning & Teardown
-
-With a filled-in `.env` and an authenticated AWS CLI:
-
-```bash
-make bootstrap   # zero → fully wired stack (idempotent, safe to re-run)
-make teardown    # destroys the whole stack (asks for confirmation; DELETES ALL DATA)
-```
-
-`make bootstrap` ([scripts/bootstrap.sh](scripts/bootstrap.sh)) creates, in order: DynamoDB tables, the files S3 bucket, the SQS jobs queue + DLQ, a shared IAM role (DynamoDB/S3/SQS/logs), builds and deploys both Lambda functions (arm64), sets their env vars/timeouts/memory, connects the queue to the worker with `ReportBatchItemFailures`, exposes a public function URL for the API, and (if `WEB_BUCKET_NAME` is set) prepares the web hosting bucket. It finishes by printing the API URL and the exact GitHub Actions secrets/variables to configure for CI/CD.
-
-`make teardown` ([scripts/teardown.sh](scripts/teardown.sh)) removes all of the above in reverse order — event source mapping, both Lambdas, the IAM role, queues, tables, and buckets **including all data**. It requires typing `destroy` to confirm (`FORCE=1` skips the prompt for automation). CloudFront distributions and CloudWatch log groups are intentionally left for manual cleanup.
 
 ---
 
 ## Testing
 
-Tests are split by Rust convention:
-
-- **Unit tests** live next to the code in `#[cfg(test)]` modules (private helpers: JSON extraction, WAV encoding, UTF-8 truncation, content types).
-- **Integration tests** live in [`tests/`](tests/): `ai_service_test.rs` (AI service against a mocked Gemini API via wiremock), `auth_service_test.rs` (JWT + password hashing), `job_format_test.rs` (SQS job wire-format contract).
-
-Makefile shortcuts for development:
+- **Unit:** `#[cfg(test)]` next to the code (citations, compiler, extract, retrieval, MCP protocol).
+- **Integration:** [`tests/`](tests/) — Gemini mock (`ai_service_test`), JWT (`auth_service_test`), SQS job JSON (`job_format_test`).
 
 ```bash
-make test         # everything (unit + integration)
-make test-unit    # unit tests only
-make test-int     # integration tests only
-make test-ai      # just the AI service suite
-make test-one t=analyze_book_toc   # single test by name, with output
-make test-watch   # re-run on file change (needs cargo-watch)
-make check        # exactly what CI runs: fmt, clippy -D warnings, tests, web build
+make test
+make test-unit
+make test-int
+make test-ai
+make test-one t=analyze_book_toc
+make check        # fmt, clippy -D warnings, tests, web build
 ```
 
 ---
 
 ## Directory Structure
 
-- `src/`: Rust Backend application code.
-  - `api/`: Route handlers and nested routers.
-  - `models/`: Data structures and `utoipa::ToSchema` definitions.
-  - `services/`: Core logic (AI, Auth, Storage, Background Tasks).
-  - `db/`: DynamoDB client and data access layers.
-  - `lib.rs`: Library root (shared by all binaries and integration tests).
-  - `main.rs`: API entry point (Hybrid TCP/Lambda server).
-  - `worker.rs`: SQS background-jobs worker Lambda.
-  - `manage.rs`: Infrastructure management CLI.
-- `tests/`: Integration tests (AI service, auth, job wire format).
-- `web/`: Frontend React application code.
-- `makefile`: Command shorthands for development and deployment.
-- `Dockerfile`: (Legacy) Used for optional containerized builds.
-
----
-
-## OpenAPI & Documentation
-
-Slidegen features automatic API documentation. When the backend is running, visit:
-
-- **Interactive UI**: `/swagger-ui`
-- **JSON Spec**: `/api-docs/openapi.json`
+- `src/api/` — JWT routes + `v1` service API
+- `src/models/` — subjects, chapters, jobs, SceneSpec
+- `src/services/` — AI, extract, citations, compiler, EventBridge, Qdrant, retrieval, SQS jobs
+- `src/runtime/v1/` — kit.js, player.js, style.css (compiled into each package)
+- `src/mcp.rs` + `src/bin/mcp.rs` — MCP stdio server
+- `src/worker.rs` — Lambda event source **or** Fargate long-poll
+- `src/manage.rs` — tables / bucket / queue CLI
+- `deploy/fargate-worker.json` — ECS task definition
+- `Dockerfile` — worker image (not the API)
+- `web/` — React app
+- `tests/` — integration tests
