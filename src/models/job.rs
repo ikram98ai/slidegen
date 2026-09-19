@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum JobKind {
     ProcessSubject,
     GenerateSlides,
+    GenerateChapter,
 }
 
 impl JobKind {
@@ -13,6 +14,7 @@ impl JobKind {
         match self {
             Self::ProcessSubject => "process_subject",
             Self::GenerateSlides => "generate_slides",
+            Self::GenerateChapter => "generate_chapter",
         }
     }
 }
@@ -45,6 +47,7 @@ pub enum JobStage {
     ExtractingPages,
     AnalyzingToc,
     GeneratingSlides,
+    GeneratingScenes,
     Completed,
     Failed,
 }
@@ -56,6 +59,7 @@ impl JobStage {
             Self::ExtractingPages => "extracting_pages",
             Self::AnalyzingToc => "analyzing_toc",
             Self::GeneratingSlides => "generating_slides",
+            Self::GeneratingScenes => "generating_scenes",
             Self::Completed => "completed",
             Self::Failed => "failed",
         }
@@ -142,6 +146,37 @@ impl JobRecord {
             kind: JobKind::GenerateSlides.as_str().to_string(),
             status: JobStatus::Queued.as_str().to_string(),
             stage: JobStage::GeneratingSlides.as_str().to_string(),
+            user_id: user_id.into(),
+            tenant_id,
+            subject_id: subject_id.into(),
+            chapter_id: Some(chapter_id.into()),
+            file_s3path: None,
+            processed_pages: None,
+            total_pages: None,
+            processed_slides: None,
+            total_slides: None,
+            chapters_done: None,
+            chapters_total: None,
+            extract_prefix: None,
+            page_offset: None,
+            error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn new_generate_chapter(
+        user_id: impl Into<String>,
+        tenant_id: Option<String>,
+        subject_id: impl Into<String>,
+        chapter_id: impl Into<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: JobKind::GenerateChapter.as_str().to_string(),
+            status: JobStatus::Queued.as_str().to_string(),
+            stage: JobStage::GeneratingScenes.as_str().to_string(),
             user_id: user_id.into(),
             tenant_id,
             subject_id: subject_id.into(),

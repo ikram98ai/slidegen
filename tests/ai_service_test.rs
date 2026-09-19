@@ -143,6 +143,43 @@ async fn generate_slides_parses_completion() {
 }
 
 #[tokio::test]
+async fn generate_chapter_parses_scene_spec() {
+    let server = MockServer::start().await;
+    let completion = r#"{
+      "kid_lede": "Packets are labeled boxes.",
+      "scenes": [{
+        "id": "packets",
+        "title": "What is a packet?",
+        "kid_summary": "A small labeled box of data.",
+        "viz": { "type": "steps", "params": { "title": "Send", "steps": [{"title": "Write", "caption": "Put data in."}] } },
+        "depth": "A packet has a header and a payload.",
+        "citations": [{ "pdf_page": 14, "printed_page": 3, "paragraph_id": "p14-2", "quote": "A packet is a small labeled box of data." }]
+      }]
+    }"#;
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/test-model:generateContent"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(text_response(completion)))
+        .mount(&server)
+        .await;
+
+    let svc = service_for(&server);
+    let chapter = svc
+        .generate_chapter(
+            "Packets",
+            "[p14-2] A packet is a small labeled box of data.",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(chapter.kid_lede, "Packets are labeled boxes.");
+    assert_eq!(chapter.scenes.len(), 1);
+    assert_eq!(chapter.scenes[0].id, "packets");
+    assert_eq!(chapter.scenes[0].viz.kind, "steps");
+    assert_eq!(chapter.scenes[0].citations[0].paragraph_id, "p14-2");
+}
+
+#[tokio::test]
 async fn generate_slide_audio_returns_wav_with_mime_sample_rate() {
     let server = MockServer::start().await;
     let pcm = vec![10u8, 20, 30, 40, 50, 60];

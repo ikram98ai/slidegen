@@ -1,5 +1,5 @@
 //! worker — SQS-driven Lambda that executes Slidegen background jobs
-//! (subject TOC analysis, slide + audio generation).
+//! (subject TOC analysis, slide generation, interactive chapter packages).
 //!
 //! The API Lambda enqueues `Job` messages (see `services::bg_tasks::Job`);
 //! this binary is deployed as a second Lambda function with the SQS queue as

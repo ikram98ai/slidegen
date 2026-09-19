@@ -7,6 +7,7 @@ use axum::{
 use chrono::Utc;
 use serde::Serialize;
 use std::sync::Arc;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -26,6 +27,8 @@ pub fn router() -> Router<Arc<AppState>> {
             "/{subject_id}/{chapter_id}/slides/generate",
             post(generate_slides),
         )
+        .route("/{subject_id}/{chapter_id}/generate", post(generate_slides))
+        .route("/{subject_id}/{chapter_id}/embed", get(get_chapter_embed))
         .route("/{chapter_id}/slides", get(get_chapter_slides))
         .route("/{chapter_id}/slides/{slide_id}", patch(update_slide))
         .route("/{chapter_id}/slides/{slide_id}", delete(delete_slide))
@@ -208,7 +211,19 @@ pub async fn delete_chapter(
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct GenerativeResponse {
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
 }
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ChapterEmbedResponse {
+    pub embed_url: String,
+    pub expires_in: u64,
+    pub package_key: String,
+    pub scene_count: i32,
+}
+
+const EMBED_TTL_SECS: u64 = 3600;
 
 #[utoipa::path(
     post,
@@ -218,7 +233,7 @@ pub struct GenerativeResponse {
         ("chapter_id" = String, Path, description = "Chapter ID")
     ),
     responses(
-        (status = 200, description = "Successfully triggered slide generation", body = GenerativeResponse),
+        (status = 200, description = "Successfully triggered interactive chapter generation", body = GenerativeResponse),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 404, description = "Not found")
@@ -253,15 +268,88 @@ pub async fn generate_slides(
 
     let job = state
         .bg_tasks
-        .start_generate_slides(current_user.id.clone(), None, subject_id, chapter_id)
+        .start_generate_chapter(current_user.id.clone(), None, subject_id, chapter_id)
         .await
         .map_err(AppError::InternalServerError)?;
 
-    chapter_to_process.job_id = Some(job.id);
+    chapter_to_process.job_id = Some(job.id.clone());
     let _ = state.db.save_chapter(&chapter_to_process).await;
 
     Ok(Json(GenerativeResponse {
-        message: "Slide generation started".to_string(),
+        message: "Chapter generation started".to_string(),
+        job_id: Some(job.id),
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/chapters/{subject_id}/{chapter_id}/embed",
+    params(
+        ("subject_id" = String, Path, description = "Subject ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    responses(
+        (status = 200, description = "Presigned URL for the isolated chapter iframe", body = ChapterEmbedResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Chapter package not ready")
+    ),
+    tag = "Chapters",
+    security(
+        ("bearerAuth" = [])
+    )
+)]
+pub async fn get_chapter_embed(
+    State(state): State<Arc<AppState>>,
+    Path((subject_id, chapter_id)): Path<(String, String)>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<ChapterEmbedResponse>, AppError> {
+    let chapter = match state.db.get_chapter(&subject_id, &chapter_id).await {
+        Ok(Some(c)) => c,
+        _ => return Err(AppError::NotFound("Chapter not found".to_string())),
+    };
+
+    if current_user.id != chapter.user_id {
+        return Err(AppError::Forbidden(
+            "You do not have permission to view this chapter".to_string(),
+        ));
+    }
+
+    if chapter.package_key.is_none() {
+        return Err(AppError::NotFound("Chapter package not ready".to_string()));
+    }
+
+    let html_key = match state
+        .bg_tasks
+        .refresh_chapter_package(&chapter.user_id, &subject_id, &chapter_id, EMBED_TTL_SECS)
+        .await
+    {
+        Ok(key) => key,
+        Err(e) => {
+            warn!(
+                error = format!("{e:#}"),
+                chapter_id, "Falling back to stored chapter HTML"
+            );
+            chapter
+                .package_key
+                .clone()
+                .ok_or_else(|| AppError::NotFound("Chapter package not ready".to_string()))?
+        }
+    };
+
+    let embed_url = state
+        .storage
+        .get_presigned_url(&html_key, EMBED_TTL_SECS)
+        .await
+        .map_err(AppError::InternalServerError)?;
+
+    let scene_count = chapter.total_slides.unwrap_or(0);
+
+    Ok(Json(ChapterEmbedResponse {
+        embed_url,
+        expires_in: EMBED_TTL_SECS,
+        package_key: html_key,
+        scene_count,
     }))
 }
 

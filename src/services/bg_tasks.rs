@@ -1,6 +1,10 @@
 use crate::config::Settings;
 use crate::db::Database;
-use crate::models::{Chapter, JobRecord, JobStage, JobStatus, Slide, Subject};
+use crate::models::{
+    Chapter, ChapterManifest, JobRecord, JobStage, JobStatus, SceneSpec, Slide, Subject,
+    chapter_audio_key, chapter_manifest_key, chapter_package_html_key,
+};
+use crate::services::compiler::compile_chapter;
 use crate::services::extract::{
     self, ExtractManifest, ExtractedPage, arabic_from_label, extract_prefix, manifest_object_key,
     page_object_key,
@@ -40,6 +44,13 @@ pub enum Job {
         job_id: Option<String>,
     },
     GenerateSlides {
+        user_id: String,
+        subject_id: String,
+        chapter_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
+    },
+    GenerateChapter {
         user_id: String,
         subject_id: String,
         chapter_id: String,
@@ -154,6 +165,30 @@ impl BackgroundTasksService {
         Ok(job)
     }
 
+    pub async fn start_generate_chapter(
+        &self,
+        user_id: String,
+        tenant_id: Option<String>,
+        subject_id: String,
+        chapter_id: String,
+    ) -> Result<JobRecord> {
+        let job = JobRecord::new_generate_chapter(
+            user_id.clone(),
+            tenant_id,
+            subject_id.clone(),
+            chapter_id.clone(),
+        );
+        self.db.save_job(&job).await?;
+        self.dispatch(Job::GenerateChapter {
+            user_id,
+            subject_id,
+            chapter_id,
+            job_id: Some(job.id.clone()),
+        })
+        .await?;
+        Ok(job)
+    }
+
     /// Hands a job off for background execution: to SQS when a queue is
     /// configured (required on Lambda, where in-process tasks stall once the
     /// response is sent), otherwise to an in-process tokio task.
@@ -200,6 +235,20 @@ impl BackgroundTasksService {
                     .await?
                     .context("Chapter not found")?;
                 self.generate_slides_bg(user_id, subject_id, chapter, job_id)
+                    .await
+            }
+            Job::GenerateChapter {
+                user_id,
+                subject_id,
+                chapter_id,
+                job_id,
+            } => {
+                let chapter = self
+                    .db
+                    .get_chapter(&subject_id, &chapter_id)
+                    .await?
+                    .context("Chapter not found")?;
+                self.generate_chapter_bg(user_id, subject_id, chapter, job_id)
                     .await
             }
         }
@@ -382,7 +431,7 @@ impl BackgroundTasksService {
         }
     }
 
-    /// Best-effort slide-count progress write for a chapter's generation run.
+    /// Best-effort slide/scene progress write for a chapter's generation run.
     async fn update_slide_progress(
         &self,
         subject_id: &str,
@@ -390,6 +439,45 @@ impl BackgroundTasksService {
         job_id: Option<&str>,
         processed: i32,
         total: i32,
+    ) {
+        self.update_generation_progress(
+            subject_id,
+            chapter_id,
+            job_id,
+            processed,
+            total,
+            JobStage::GeneratingSlides,
+        )
+        .await;
+    }
+
+    async fn update_scene_progress(
+        &self,
+        subject_id: &str,
+        chapter_id: &str,
+        job_id: Option<&str>,
+        processed: i32,
+        total: i32,
+    ) {
+        self.update_generation_progress(
+            subject_id,
+            chapter_id,
+            job_id,
+            processed,
+            total,
+            JobStage::GeneratingScenes,
+        )
+        .await;
+    }
+
+    async fn update_generation_progress(
+        &self,
+        subject_id: &str,
+        chapter_id: &str,
+        job_id: Option<&str>,
+        processed: i32,
+        total: i32,
+        stage: JobStage,
     ) {
         if let Ok(Some(mut chapter)) = self.db.get_chapter(subject_id, chapter_id).await {
             chapter.processed_slides = Some(processed);
@@ -401,7 +489,7 @@ impl BackgroundTasksService {
             && let Ok(Some(mut job)) = self.db.get_job(id).await
         {
             job.status = JobStatus::Running.as_str().to_string();
-            job.stage = JobStage::GeneratingSlides.as_str().to_string();
+            job.stage = stage.as_str().to_string();
             job.processed_slides = Some(processed);
             job.total_slides = Some(total);
             job.updated_at = Utc::now();
@@ -690,6 +778,223 @@ impl BackgroundTasksService {
 
         self.complete_job(job_id, None).await;
         Ok(())
+    }
+
+    pub async fn generate_chapter_bg(
+        &self,
+        user_id: String,
+        subject_id: String,
+        chapter: Chapter,
+        job_id: Option<String>,
+    ) -> Result<()> {
+        tracing::info!(
+            user_id = %user_id,
+            subject_id = %subject_id,
+            chapter_id = %chapter.id,
+            "Background: generating interactive chapter"
+        );
+
+        if let Err(e) = self
+            .do_generate_chapter(&user_id, &subject_id, &chapter, job_id.as_deref())
+            .await
+        {
+            tracing::error!(
+                error = format!("{e:#}"),
+                "Failed to generate chapter background task"
+            );
+            self.fail_job(job_id.as_deref(), &e).await;
+            if let Ok(Some(mut c)) = self.db.get_chapter(&subject_id, &chapter.id).await {
+                c.processing_status = Some("failed".to_string());
+                let _ = self.db.save_chapter(&c).await;
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn do_generate_chapter(
+        &self,
+        user_id: &str,
+        subject_id: &str,
+        chapter: &Chapter,
+        job_id: Option<&str>,
+    ) -> Result<()> {
+        let subject = self
+            .db
+            .get_subject(subject_id)
+            .await?
+            .context("Subject not found")?;
+
+        if let Ok(Some(mut c)) = self.db.get_chapter(subject_id, &chapter.id).await {
+            c.job_id = job_id.map(str::to_string);
+            let _ = self.db.save_chapter(&c).await;
+        }
+
+        let chapter_text = self.chapter_text_for_generation(&subject, chapter).await?;
+        if chapter_text.trim().is_empty() {
+            anyhow::bail!("No text extracted for chapter in {}", subject.file_path);
+        }
+
+        let generated = self
+            .ai
+            .generate_chapter(&chapter.title, &chapter_text)
+            .await
+            .context("AI failed to generate chapter scenes")?;
+
+        if generated.scenes.is_empty() {
+            anyhow::bail!("Model returned no scenes for chapter {}", chapter.id);
+        }
+
+        let scenes: Vec<SceneSpec> = generated
+            .scenes
+            .into_iter()
+            .enumerate()
+            .map(|(idx, scene)| SceneSpec::from_generated(scene, idx, &chapter_text))
+            .collect();
+
+        let mut manifest = ChapterManifest::new(
+            subject.id.clone(),
+            subject.title.clone(),
+            chapter.id.clone(),
+            chapter.title.clone(),
+            generated.kid_lede,
+            chapter.order_index,
+            chapter.page_start,
+            chapter.page_end,
+            scenes,
+        );
+
+        let total_scenes = manifest.scenes.len() as i32;
+        self.update_scene_progress(subject_id, &chapter.id, job_id, 0, total_scenes)
+            .await;
+
+        for (idx, scene) in manifest.scenes.iter_mut().enumerate() {
+            let audio_text = format!("{}. {}", scene.title, scene.depth.text);
+            match self.ai.generate_slide_audio(&audio_text).await {
+                Ok(wav_bytes) => {
+                    let audio_key = chapter_audio_key(user_id, subject_id, &chapter.id, &scene.id);
+                    if self
+                        .storage
+                        .upload_file(&audio_key, wav_bytes)
+                        .await
+                        .is_ok()
+                    {
+                        scene.depth.audio_key = Some(audio_key);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = format!("{e:#}"),
+                        scene_id = %scene.id,
+                        "Failed to generate scene audio"
+                    );
+                }
+            }
+            self.update_scene_progress(
+                subject_id,
+                &chapter.id,
+                job_id,
+                idx as i32 + 1,
+                total_scenes,
+            )
+            .await;
+        }
+
+        let html_key = self
+            .compile_and_upload_chapter(
+                user_id,
+                subject_id,
+                &chapter.id,
+                &mut manifest,
+                7 * 24 * 3600,
+            )
+            .await?;
+
+        if let Some(mut c) = self.db.get_chapter(subject_id, &chapter.id).await? {
+            c.processing_status = Some("completed".to_string());
+            c.package_key = Some(html_key);
+            c.updated_at = Utc::now();
+            self.db
+                .save_chapter(&c)
+                .await
+                .context("Failed to update chapter status")?;
+        }
+
+        self.complete_job(job_id, None).await;
+        Ok(())
+    }
+
+    /// Signs audio URLs, compiles HTML, and writes both the durable manifest
+    /// (without ephemeral URLs) and the chapter package.
+    pub async fn compile_and_upload_chapter(
+        &self,
+        user_id: &str,
+        subject_id: &str,
+        chapter_id: &str,
+        manifest: &mut ChapterManifest,
+        audio_ttl_secs: u64,
+    ) -> Result<String> {
+        self.sign_scene_audio(manifest, audio_ttl_secs).await;
+
+        let html = compile_chapter(manifest).context("Failed to compile chapter HTML")?;
+        let html_key = chapter_package_html_key(user_id, subject_id, chapter_id);
+        let manifest_key = chapter_manifest_key(user_id, subject_id, chapter_id);
+
+        let mut stored = manifest.clone();
+        stored.strip_ephemeral_urls();
+        self.storage
+            .upload_json(&manifest_key, &stored)
+            .await
+            .context("Failed to upload chapter manifest")?;
+        self.storage
+            .upload_file(&html_key, html.into_bytes())
+            .await
+            .context("Failed to upload chapter HTML")?;
+        Ok(html_key)
+    }
+
+    pub async fn refresh_chapter_package(
+        &self,
+        user_id: &str,
+        subject_id: &str,
+        chapter_id: &str,
+        audio_ttl_secs: u64,
+    ) -> Result<String> {
+        let manifest_key = chapter_manifest_key(user_id, subject_id, chapter_id);
+        let bytes = self
+            .storage
+            .download_file(&manifest_key)
+            .await
+            .context("Chapter manifest not found")?;
+        let mut manifest: ChapterManifest =
+            serde_json::from_slice(&bytes).context("Failed to parse chapter manifest")?;
+        self.compile_and_upload_chapter(
+            user_id,
+            subject_id,
+            chapter_id,
+            &mut manifest,
+            audio_ttl_secs,
+        )
+        .await
+    }
+
+    async fn sign_scene_audio(&self, manifest: &mut ChapterManifest, secs: u64) {
+        for scene in &mut manifest.scenes {
+            let Some(key) = scene.depth.audio_key.clone() else {
+                continue;
+            };
+            scene.depth.audio_url = match self.storage.get_presigned_url(&key, secs).await {
+                Ok(url) => Some(url),
+                Err(e) => {
+                    tracing::warn!(
+                        error = format!("{e:#}"),
+                        key,
+                        "Falling back to public audio URL"
+                    );
+                    Some(self.storage.get_public_url(&key))
+                }
+            };
+        }
     }
 
     /// Prefers the persisted page extract (paragraphs + citations later);

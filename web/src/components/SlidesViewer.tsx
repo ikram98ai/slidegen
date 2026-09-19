@@ -1,11 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Layout, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SlideCard } from "./SlideCard";
+import { ChapterViewer } from "./ChapterViewer";
 import { useChapterSlides } from "../hooks/useAppQueries";
-import { Button } from "./ui/Button";
-import { CircularProgress } from "./ui/CircularProgress";
-import { chaptersApi } from "../services/api";
 import type { ChapterResponse } from "../types";
 
 interface SlidesViewerProps {
@@ -26,36 +24,33 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
   const queryClient = useQueryClient();
   const chapterId = chapter.id;
   const isProcessing = chapter.processing_status === "processing";
-  const { data: slides } = useChapterSlides(chapterId, isProcessing);
+  const { data: slides } = useChapterSlides(chapterId, false);
 
-  // When generation finishes, fetch the final slide set one last time (the
-  // last poll may have run before the job saved the final slide).
   const wasProcessing = useRef(isProcessing);
   useEffect(() => {
     if (wasProcessing.current && !isProcessing) {
       queryClient.invalidateQueries({ queryKey: ["chapters", chapterId] });
+      queryClient.invalidateQueries({
+        queryKey: ["chapter-embed", subjectId, chapterId],
+      });
     }
     wasProcessing.current = isProcessing;
-  }, [isProcessing, chapterId, queryClient]);
+  }, [isProcessing, chapterId, subjectId, queryClient]);
 
-  const generateSlidesForActiveChapter = async () => {
-    try {
-      await chaptersApi.generateSlides(subjectId, chapterId);
-      // Refresh chapter status immediately so the progress view appears.
-      queryClient.invalidateQueries({ queryKey: ["subject", subjectId] });
-    } catch (err) {
-      alert(
-        err instanceof Error ? err.message : "Failed to start slides generation."
-      );
-    }
-  };
+  if (chapter.package_key || isProcessing || (slides && slides.length === 0)) {
+    return <ChapterViewer subjectId={subjectId} chapter={chapter} />;
+  }
+
+  if (!slides) {
+    return null;
+  }
 
   if (viewMode === "vertical") {
     return (
       <div className="grid grid-cols-1 gap-8">
-        {slides?.map((slide, idx) => (
+        {slides.map((slide, idx) => (
           <SlideCard
-            key={idx}
+            key={slide.id ?? idx}
             chapterId={chapterId}
             slide={slide}
             index={idx}
@@ -64,97 +59,57 @@ export const SlidesViewer: React.FC<SlidesViewerProps> = ({
         ))}
       </div>
     );
-  } else {
-    // Horizontal (Presentation) Mode
-    if (isProcessing) {
-      const total = chapter.total_slides ?? 0;
-      const processed = chapter.processed_slides ?? 0;
-      return (
-        <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
-          {total > 0 ? (
-            <>
-              <CircularProgress processed={processed} total={total} size={96} />
-              <p className="text-gray-500 mt-6 font-medium">
-                Generating slides with narration — {processed} of {total} ready
-              </p>
-            </>
-          ) : (
-            <>
-              <Loader2 className="w-16 h-16 text-blue-500 mb-4 animate-spin" />
-              <p className="text-gray-500 mb-6 font-medium">
-                Reading the chapter and planning your slides...
-              </p>
-            </>
-          )}
-        </div>
-      );
-    }
-
-    if (slides === undefined || slides.length === 0)
-      return (
-        <div className="flex flex-col items-center justify-center flex-1 bg-white rounded-3xl shadow-sm border border-gray-100 min-h-[400px]">
-          <Layout className="w-16 h-16 text-gray-300 mb-4" />
-          <p className="text-gray-500 mb-6">
-            Ready to create content for this section.
-          </p>
-          <Button onClick={generateSlidesForActiveChapter}>
-            Generate Slides
-          </Button>
-        </div>
-      );
-
-    const currentSlide = slides[currentHorizontalIndex];
-
-    return (
-      <div className="flex flex-col h-full items-center justify-center">
-        <div className="w-full max-w-4xl min-h-[500px] relative">
-          <SlideCard
-            key={currentSlide.id ?? currentHorizontalIndex}
-            chapterId={chapterId}
-            slide={currentSlide}
-            index={currentHorizontalIndex}
-            total={slides.length}
-          />
-
-          {/* Navigation Buttons */}
-          <button
-            onClick={() =>
-              setCurrentHorizontalIndex(Math.max(0, currentHorizontalIndex - 1))
-            }
-            disabled={currentHorizontalIndex === 0}
-            className="absolute -left-16 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white shadow-lg text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:scale-110 transition-transform"
-          >
-            <ChevronLeft size={24} />
-          </button>
-
-          <button
-            onClick={() =>
-              setCurrentHorizontalIndex(
-                Math.min(slides.length - 1, currentHorizontalIndex + 1)
-              )
-            }
-            disabled={currentHorizontalIndex === slides.length - 1}
-            className="absolute -right-16 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white shadow-lg text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:scale-110 transition-transform"
-          >
-            <ChevronRight size={24} />
-          </button>
-        </div>
-
-        {/* Dots Indicator */}
-        <div className="flex space-x-2 mt-8">
-          {slides.map((_, idx) => (
-            <button
-              key={idx}
-              onClick={() => setCurrentHorizontalIndex(idx)}
-              className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                idx === currentHorizontalIndex
-                  ? "bg-blue-600 w-6"
-                  : "bg-gray-300"
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-    );
   }
+
+  const currentSlide = slides[currentHorizontalIndex];
+
+  return (
+    <div className="flex flex-col h-full items-center justify-center">
+      <div className="w-full max-w-4xl min-h-[500px] relative">
+        <SlideCard
+          key={currentSlide.id ?? currentHorizontalIndex}
+          chapterId={chapterId}
+          slide={currentSlide}
+          index={currentHorizontalIndex}
+          total={slides.length}
+        />
+
+        <button
+          onClick={() =>
+            setCurrentHorizontalIndex(Math.max(0, currentHorizontalIndex - 1))
+          }
+          disabled={currentHorizontalIndex === 0}
+          className="absolute -left-16 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white shadow-lg text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:scale-110 transition-transform"
+        >
+          <ChevronLeft size={24} />
+        </button>
+
+        <button
+          onClick={() =>
+            setCurrentHorizontalIndex(
+              Math.min(slides.length - 1, currentHorizontalIndex + 1)
+            )
+          }
+          disabled={currentHorizontalIndex === slides.length - 1}
+          className="absolute -right-16 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white shadow-lg text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed hover:scale-110 transition-transform"
+        >
+          <ChevronRight size={24} />
+        </button>
+      </div>
+
+      <div className="flex space-x-2 mt-8">
+        {slides.map((_, idx) => (
+          <button
+            key={idx}
+            onClick={() => setCurrentHorizontalIndex(idx)}
+            className={`w-2 h-2 rounded-full transition-all duration-300 ${
+              idx === currentHorizontalIndex
+                ? "bg-blue-600 w-6"
+                : "bg-gray-300"
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
 };

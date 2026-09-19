@@ -111,7 +111,9 @@ export const ReaderPage: React.FC = () => {
                   </h1>
                 </div>
 
-                {renderViewToggle()}
+                {!activeViewerChapter.package_key &&
+                  activeViewerChapter.processing_status !== "processing" &&
+                  renderViewToggle()}
               </div>
 
               {activeViewerChapter && (

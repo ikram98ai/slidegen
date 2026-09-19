@@ -41,6 +41,27 @@ fn process_subject_job_roundtrips() {
 }
 
 #[test]
+fn generate_chapter_job_roundtrips() {
+    let job = Job::GenerateChapter {
+        user_id: "u1".to_string(),
+        subject_id: "s1".to_string(),
+        chapter_id: "c1".to_string(),
+        job_id: None,
+    };
+    let json = serde_json::to_string(&job).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"generate_chapter","user_id":"u1","subject_id":"s1","chapter_id":"c1"}"#
+    );
+
+    let parsed: Job = serde_json::from_str(&json).unwrap();
+    match parsed {
+        Job::GenerateChapter { chapter_id, .. } => assert_eq!(chapter_id, "c1"),
+        other => panic!("wrong variant: {other:?}"),
+    }
+}
+
+#[test]
 fn unknown_job_type_fails_to_parse() {
     let json = r#"{"type":"drop_all_tables","user_id":"u1"}"#;
     assert!(serde_json::from_str::<Job>(json).is_err());

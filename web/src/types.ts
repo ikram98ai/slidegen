@@ -154,3 +154,10 @@ export interface SlideUpdate {
   explanation?: string | null;
   order_index?: number | null;
 }
+
+export interface ChapterEmbedResponse {
+  embed_url: string;
+  expires_in: number;
+  package_key: string;
+  scene_count: number;
+}

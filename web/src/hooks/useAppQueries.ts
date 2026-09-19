@@ -14,6 +14,7 @@ import type {
   SlideResponse,
   SubjectDetailResponse,
   JobResponse,
+  ChapterEmbedResponse,
 } from "../types";
 import { DocType } from "../types";
 import { useAuthStore } from "../store/authStore";
@@ -198,6 +199,19 @@ export const useJob = (jobId: string | undefined | null) => {
       }
       return false;
     },
+  });
+};
+
+export const useChapterEmbed = (
+  subjectId: string,
+  chapterId: string,
+  enabled = true
+) => {
+  return useQuery<ChapterEmbedResponse>({
+    queryKey: ["chapter-embed", subjectId, chapterId],
+    queryFn: () => chaptersApi.getChapterEmbed(subjectId, chapterId),
+    enabled: enabled && !!subjectId && !!chapterId,
+    staleTime: 30 * 60 * 1000,
   });
 };
 

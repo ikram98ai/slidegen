@@ -1,4 +1,5 @@
 use crate::config::Settings;
+use crate::models::GeneratedChapter;
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose};
 use reqwest::Client;
@@ -329,6 +330,69 @@ impl AIService {
             .with_context(|| format!("Failed to parse slides JSON from: {}", completion))?;
 
         Ok(slides.slides)
+    }
+
+    /// Writes a grounded SceneSpec chapter. The model must cite paragraph IDs
+    /// from the extract (`[p12-2] ...`); it must not invent HTML.
+    pub async fn generate_chapter(
+        &self,
+        chapter_title: &str,
+        chapter_text: &str,
+    ) -> Result<GeneratedChapter> {
+        let system_instruction = r#"You are an expert educational designer for interactive book chapters.
+Turn the supplied source text into 4–8 short scenes a 12-year-old can follow.
+Reply ONLY with JSON matching this schema:
+{
+  "kid_lede": "one-sentence chapter hook",
+  "scenes": [
+    {
+      "id": "kebab-case-id",
+      "title": "string",
+      "kid_summary": "2–3 sentences in plain language",
+      "viz": {
+        "type": "steps | two_lane | tradeoff | flow | slider_compare | quiz",
+        "params": {}
+      },
+      "depth": "2–4 paragraph voice-over that explains the idea more carefully",
+      "citations": [
+        {
+          "pdf_page": 1,
+          "printed_page": 1,
+          "paragraph_id": "p12-2",
+          "quote": "exact contiguous phrase copied from that paragraph"
+        }
+      ],
+      "quiz": [{ "q": "string", "options": ["A","B","C"], "answer": 0, "why": "string" }]
+    }
+  ]
+}
+Rules:
+- Every scene MUST include at least one citation.
+- citation.quote MUST be copied verbatim from the paragraph marked [paragraph_id].
+- pdf_page MUST match the 'PDF p.N' label. printed_page is the printed folio when given, else omit it.
+- viz.params by type:
+  steps: { "title": "...", "steps": [{ "title": "...", "caption": "..." }] }
+  two_lane: { "title": "...", "left": { "title": "...", "points": ["..."] }, "right": { "title": "...", "points": ["..."] } }
+  tradeoff: { "title": "...", "left": { "title": "...", "text": "..." }, "right": { "title": "...", "text": "..." } }
+  flow: { "title": "...", "nodes": ["A","B","C"], "caption": "..." }
+  slider_compare: { "title": "...", "label": "...", "left_label": "...", "right_label": "...", "captions": ["..."] }
+  quiz: put items in the scene-level "quiz" array; params may be {}
+- Do not write HTML, CSS, or JavaScript. Do not invent facts that are not in the source.
+- Prefer 4–6 scenes. Never more than 8."#
+            .to_string();
+
+        let prompt = format!(
+            "Chapter title: {chapter_title}\n\nSource text (paragraphs are labeled [pPAGE-N]):\n{chapter_text}"
+        );
+
+        let completion = self
+            .call_gemini_text(&self.text_model, Some(system_instruction), prompt)
+            .await?;
+
+        let chapter: GeneratedChapter = parse_json_completion(&completion)
+            .with_context(|| format!("Failed to parse chapter JSON from: {}", completion))?;
+
+        Ok(chapter)
     }
 
     /// Generates narration audio for a slide and returns playable WAV bytes.

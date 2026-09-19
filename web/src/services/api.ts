@@ -12,6 +12,7 @@ import type {
   SubjectDetailResponse,
   ChapterCreate,
   JobResponse,
+  ChapterEmbedResponse,
 } from "../types";
 
 export const authApi = {
@@ -147,7 +148,22 @@ export const chaptersApi = {
     subjectId: string,
     chapterId: string
   ): Promise<void> => {
-    await api.post(`/chapters/${subjectId}/${chapterId}/slides/generate`);
+    await api.post(`/chapters/${subjectId}/${chapterId}/generate`);
+  },
+  generateChapter: async (
+    subjectId: string,
+    chapterId: string
+  ): Promise<void> => {
+    await api.post(`/chapters/${subjectId}/${chapterId}/generate`);
+  },
+  getChapterEmbed: async (
+    subjectId: string,
+    chapterId: string
+  ): Promise<ChapterEmbedResponse> => {
+    const response = await api.get<ChapterEmbedResponse>(
+      `/chapters/${subjectId}/${chapterId}/embed`
+    );
+    return response.data;
   },
   getChapterSlides: async (
     chapterId: string
