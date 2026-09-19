@@ -33,6 +33,13 @@ pub struct Settings {
     pub gemini_api_key: Option<String>,
     pub text_model: String,
     pub embedding_model: String,
+    /// Output dimensionality for Gemini embeddings / Qdrant vectors.
+    pub embedding_dimensions: u16,
+    /// Optional Qdrant REST base URL (`https://…`). When unset, Ask falls
+    /// back to lexical retrieval over the extract.
+    pub qdrant_url: Option<String>,
+    pub qdrant_api_key: Option<String>,
+    pub qdrant_collection: String,
 }
 
 impl Default for Settings {
@@ -80,6 +87,16 @@ impl Settings {
             text_model: env::var("TEXT_MODEL").unwrap_or_else(|_| "gemini-2.5-flash".to_string()),
             embedding_model: env::var("EMBEDDING_MODEL")
                 .unwrap_or_else(|_| "gemini-embedding-001".to_string()),
+            embedding_dimensions: env::var("EMBEDDING_DIMENSIONS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(768),
+            qdrant_url: env::var("QDRANT_URL").ok().filter(|v| !v.is_empty()),
+            qdrant_api_key: env::var("QDRANT_API_KEY").ok().filter(|v| !v.is_empty()),
+            qdrant_collection: env::var("QDRANT_COLLECTION")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "slidegen".to_string()),
         }
     }
 
@@ -107,6 +124,10 @@ impl Settings {
             gemini_api_key: None,
             text_model: "test-model".into(),
             embedding_model: "test-embedding".into(),
+            embedding_dimensions: 768,
+            qdrant_url: None,
+            qdrant_api_key: None,
+            qdrant_collection: "slidegen".into(),
         }
     }
 }

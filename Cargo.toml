@@ -19,6 +19,10 @@ path = "src/worker.rs"
 name = "manage"
 path = "src/manage.rs"
 
+[[bin]]
+name = "slidegen-mcp"
+path = "src/bin/mcp.rs"
+
 [dependencies]
 anyhow = "1.0.102"
 async-trait = "0.1.89"
@@ -52,7 +56,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 utoipa = { version = "5.4.0", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
-uuid = { version = "1.21.0", features = ["v4", "serde"] }
+uuid = { version = "1.21.0", features = ["v4", "v5", "serde"] }
 validator = { version = "0.20.0", features = ["derive"] }
 
 [dev-dependencies]

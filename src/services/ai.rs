@@ -15,7 +15,25 @@ pub struct AIService {
     client: Client,
     api_key: String,
     text_model: String,
+    embedding_model: String,
+    embedding_dimensions: u16,
     base_url: String,
+}
+
+/// Gemini `taskType` for embeddings.
+#[derive(Debug, Clone, Copy)]
+pub enum EmbedTask {
+    Query,
+    Document,
+}
+
+impl EmbedTask {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Query => "RETRIEVAL_QUERY",
+            Self::Document => "RETRIEVAL_DOCUMENT",
+        }
+    }
 }
 
 // Internal Gemini REST API Request/Response structs
@@ -214,6 +232,10 @@ impl AIService {
             .clone();
 
         Self::with_config(api_key, settings.text_model.clone(), DEFAULT_BASE_URL)
+            .with_embedding_model(
+                settings.embedding_model.clone(),
+                settings.embedding_dimensions,
+            )
     }
 
     /// Builds a service with explicit configuration. Primarily useful for
@@ -227,8 +249,16 @@ impl AIService {
             client: Client::new(),
             api_key: api_key.into(),
             text_model: text_model.into(),
+            embedding_model: "gemini-embedding-001".into(),
+            embedding_dimensions: 768,
             base_url: base_url.into(),
         }
+    }
+
+    pub fn with_embedding_model(mut self, model: impl Into<String>, dimensions: u16) -> Self {
+        self.embedding_model = model.into();
+        self.embedding_dimensions = dimensions;
+        self
     }
 
     async fn call_gemini_text(
@@ -500,6 +530,123 @@ Rules:
 
         Ok(pcm_to_wav(&pcm, sample_rate, 1, 16))
     }
+
+    /// Embeds texts with Gemini. Empty inputs return an empty vector list.
+    pub async fn embed_texts(&self, texts: &[String], task: EmbedTask) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        const BATCH: usize = 16;
+        let mut out = Vec::with_capacity(texts.len());
+        for chunk in texts.chunks(BATCH) {
+            let url = format!(
+                "{}/v1beta/models/{}:batchEmbedContents",
+                self.base_url, self.embedding_model
+            );
+            let requests: Vec<GeminiEmbedRequest> = chunk
+                .iter()
+                .map(|text| GeminiEmbedRequest {
+                    model: format!("models/{}", self.embedding_model),
+                    content: GeminiContent {
+                        parts: vec![GeminiPart {
+                            text: Some(text.clone()),
+                            inline_data: None,
+                        }],
+                    },
+                    task_type: task.as_str(),
+                    output_dimensionality: self.embedding_dimensions,
+                })
+                .collect();
+
+            let response = self
+                .client
+                .post(&url)
+                .header("x-goog-api-key", &self.api_key)
+                .header("Content-Type", "application/json")
+                .json(&GeminiBatchEmbedRequest { requests })
+                .send()
+                .await
+                .context("Failed to send request to Gemini embeddings API")?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let err_text = response.text().await.unwrap_or_default();
+                anyhow::bail!("Gemini embeddings error ({}): {}", status, err_text);
+            }
+
+            let body: GeminiBatchEmbedResponse = response
+                .json()
+                .await
+                .context("Failed to parse Gemini embeddings response")?;
+            let embeddings = body.embeddings.unwrap_or_default();
+            if embeddings.len() != chunk.len() {
+                anyhow::bail!(
+                    "Gemini embeddings returned {} vectors for {} texts",
+                    embeddings.len(),
+                    chunk.len()
+                );
+            }
+            out.extend(embeddings.into_iter().map(|e| e.values));
+        }
+        Ok(out)
+    }
+
+    /// Answers a question using only the supplied citation-backed passages.
+    pub async fn answer_from_citations(
+        &self,
+        question: &str,
+        sources: &str,
+    ) -> Result<GroundedAnswer> {
+        let system_instruction =
+            r#"You answer questions about a book using ONLY the supplied sources.
+Reply ONLY with JSON:
+{ "answer": "string", "citation_ids": ["p12-2"] }
+Rules:
+- citation_ids MUST be copied from the sources. Do not invent IDs.
+- Every factual claim in the answer must be supported by those IDs.
+- If the sources do not answer the question, say so and return citation_ids: [].
+- Do not quote a paragraph without listing its id."#
+                .to_string();
+        let prompt = format!("Question: {question}\n\nSources:\n{sources}");
+        let completion = self
+            .call_gemini_text(&self.text_model, Some(system_instruction), prompt)
+            .await?;
+        parse_json_completion(&completion)
+            .with_context(|| format!("Failed to parse grounded answer from: {completion}"))
+    }
+}
+
+#[derive(Serialize)]
+struct GeminiEmbedRequest {
+    model: String,
+    content: GeminiContent,
+    #[serde(rename = "taskType")]
+    task_type: &'static str,
+    #[serde(rename = "outputDimensionality")]
+    output_dimensionality: u16,
+}
+
+#[derive(Serialize)]
+struct GeminiBatchEmbedRequest {
+    requests: Vec<GeminiEmbedRequest>,
+}
+
+#[derive(Deserialize)]
+struct GeminiBatchEmbedResponse {
+    embeddings: Option<Vec<GeminiEmbedding>>,
+}
+
+#[derive(Deserialize)]
+struct GeminiEmbedding {
+    values: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroundedAnswer {
+    pub answer: String,
+    #[serde(default)]
+    pub citation_ids: Vec<String>,
 }
 
 // Unit tests for private helpers live here; behavioral tests of the service

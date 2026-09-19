@@ -198,6 +198,17 @@ if [[ -n "${EVENT_BUS_NAME:-}" ]]; then
   EVENT_BUS_SUFFIX=$(printf ',"EVENT_BUS_NAME":"%s"' "$EVENT_BUS_NAME")
 fi
 
+QDRANT_SUFFIX=""
+if [[ -n "${QDRANT_URL:-}" ]]; then
+  QDRANT_SUFFIX=$(printf ',"QDRANT_URL":"%s"' "$QDRANT_URL")
+  if [[ -n "${QDRANT_API_KEY:-}" ]]; then
+    QDRANT_SUFFIX+=$(printf ',"QDRANT_API_KEY":"%s"' "$QDRANT_API_KEY")
+  fi
+  if [[ -n "${QDRANT_COLLECTION:-}" ]]; then
+    QDRANT_SUFFIX+=$(printf ',"QDRANT_COLLECTION":"%s"' "$QDRANT_COLLECTION")
+  fi
+fi
+
 shared_env() {
   printf '{"S3_BUCKET_NAME":"%s","SECRET_KEY":"%s","GEMINI_API_KEY":"%s","TEXT_MODEL":"%s","DEBUG":"false"%s%s}' \
     "$S3_BUCKET_NAME" "$SECRET_KEY" "$GEMINI_API_KEY" "$TEXT_MODEL" "$SERVICE_KEYS_SUFFIX" "$1"
@@ -207,7 +218,7 @@ log "Configuring API function (env vars, 30s timeout, 512MB)"
 $AWS lambda update-function-configuration \
   --function-name "$API_FUNCTION" \
   --timeout 30 --memory-size 512 \
-  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX")}" >/dev/null
+  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX$QDRANT_SUFFIX")}" >/dev/null
 $AWS lambda wait function-updated --function-name "$API_FUNCTION"
 ok "API configured"
 
@@ -215,7 +226,7 @@ log "Configuring worker function (env vars, 900s timeout, 1024MB)"
 $AWS lambda update-function-configuration \
   --function-name "$WORKER_FUNCTION" \
   --timeout 900 --memory-size 1024 \
-  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX")}" >/dev/null
+  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX$QDRANT_SUFFIX")}" >/dev/null
 $AWS lambda wait function-updated --function-name "$WORKER_FUNCTION"
 ok "Worker configured"
 

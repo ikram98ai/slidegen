@@ -15,6 +15,8 @@ use slidegen::config::Settings;
 use slidegen::db::Database;
 use slidegen::services::bg_tasks::{Job, JobQueue};
 use slidegen::services::events::EventBus;
+use slidegen::services::qdrant::QdrantClient;
+use slidegen::services::retrieval::RetrievalService;
 use slidegen::services::{AIService, BackgroundTasksService, StorageService};
 
 fn build_service(
@@ -24,8 +26,9 @@ fn build_service(
     queue: Option<JobQueue>,
     events: Option<EventBus>,
     auto_generate: bool,
+    retrieval: Option<Arc<RetrievalService>>,
 ) -> BackgroundTasksService {
-    BackgroundTasksService::with_events(db, storage, ai, queue, events, auto_generate)
+    BackgroundTasksService::with_events(db, storage, ai, queue, events, auto_generate, retrieval)
 }
 
 async fn handle_event(
@@ -82,7 +85,13 @@ async fn main() -> Result<(), Error> {
         Some(url) => Some(JobQueue::new(&settings, url).await),
         None => None,
     };
-    let bg_tasks = build_service(db, storage, ai, queue, events, auto_generate);
+    let retrieval = Some(Arc::new(RetrievalService::new(
+        db.clone(),
+        storage.clone(),
+        ai.clone(),
+        QdrantClient::from_settings(&settings),
+    )));
+    let bg_tasks = build_service(db, storage, ai, queue, events, auto_generate, retrieval);
 
     lambda_runtime::run(service_fn(|event: LambdaEvent<SqsEvent>| {
         handle_event(event, &bg_tasks)

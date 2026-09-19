@@ -5,6 +5,8 @@ pub mod citations;
 pub mod compiler;
 pub mod events;
 pub mod extract;
+pub mod qdrant;
+pub mod retrieval;
 pub mod storage;
 
 pub use ai::AIService;

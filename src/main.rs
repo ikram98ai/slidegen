@@ -11,6 +11,8 @@ use slidegen::config::Settings;
 use slidegen::db::Database;
 use slidegen::services::bg_tasks::JobQueue;
 use slidegen::services::events::EventBus;
+use slidegen::services::qdrant::QdrantClient;
+use slidegen::services::retrieval::RetrievalService;
 use slidegen::services::{AIService, BackgroundTasksService, StorageService};
 
 use utoipa::{
@@ -79,6 +81,10 @@ impl Modify for SecurityAddon {
         api::v1::get_chapter,
         api::v1::get_chapter_embed,
         api::v1::generate_chapter,
+        api::v1::search_book,
+        api::v1::ask_chapter,
+        api::v1::get_scene,
+        api::v1::get_paragraph,
     ),
     components(
         schemas(
@@ -105,6 +111,13 @@ impl Modify for SecurityAddon {
             slidegen::models::IngestBookRequest,
             slidegen::models::IngestBookResponse,
             api::v1::ServiceChapterResponse,
+            slidegen::services::retrieval::SearchRequest,
+            slidegen::services::retrieval::SearchResponse,
+            slidegen::services::retrieval::SearchHit,
+            slidegen::services::retrieval::AskRequest,
+            slidegen::services::retrieval::AskResponse,
+            slidegen::models::Citation,
+            slidegen::models::SceneSpec,
         ),
     ),
     tags(
@@ -170,6 +183,12 @@ async fn main() -> anyhow::Result<()> {
 
     let events = EventBus::from_settings(&settings).await;
     let auto_generate = settings.auto_generate_chapters;
+    let retrieval = Arc::new(RetrievalService::new(
+        db.clone(),
+        storage.clone(),
+        ai.clone(),
+        QdrantClient::from_settings(&settings),
+    ));
     let bg_tasks = Arc::new(BackgroundTasksService::with_events(
         db.clone(),
         storage.clone(),
@@ -177,6 +196,7 @@ async fn main() -> anyhow::Result<()> {
         job_queue,
         events,
         auto_generate,
+        Some(retrieval.clone()),
     ));
 
     let shared_state = Arc::new(AppState {
@@ -185,6 +205,7 @@ async fn main() -> anyhow::Result<()> {
         storage,
         ai,
         bg_tasks,
+        retrieval,
     });
 
     let app = Router::new()

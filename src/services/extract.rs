@@ -63,6 +63,13 @@ pub fn extract_prefix(user_id: &str, subject_id: &str) -> String {
     format!("subjects/{user_id}/{subject_id}/extract")
 }
 
+/// `p12-2` → PDF page 12.
+pub fn pdf_page_from_paragraph_id(id: &str) -> Option<u32> {
+    let rest = id.strip_prefix('p')?;
+    let (page, _) = rest.split_once('-')?;
+    page.parse().ok()
+}
+
 /// Splits a page's extracted text into stable paragraph IDs (`p{page}-{n}`).
 pub fn split_paragraphs(page_text: &str, pdf_page: u32) -> Vec<Paragraph> {
     let mut paragraphs = Vec::new();
@@ -379,6 +386,8 @@ mod tests {
         assert_eq!(paras[0].id, "p17-1");
         assert_eq!(paras[0].text, "First thought.");
         assert_eq!(paras[1].id, "p17-2");
+        assert_eq!(pdf_page_from_paragraph_id("p17-2"), Some(17));
+        assert_eq!(pdf_page_from_paragraph_id("bad"), None);
     }
 
     #[test]

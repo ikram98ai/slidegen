@@ -13,6 +13,7 @@ use crate::services::extract::{
     self, ExtractManifest, ExtractedPage, arabic_from_label, extract_prefix, manifest_object_key,
     page_object_key,
 };
+use crate::services::retrieval::RetrievalService;
 use crate::services::{AIService, StorageService};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -134,6 +135,7 @@ pub struct BackgroundTasksService {
     local_tx: Option<mpsc::UnboundedSender<Job>>,
     event_tx: Option<mpsc::UnboundedSender<(String, serde_json::Value)>>,
     auto_generate_chapters: bool,
+    retrieval: Option<Arc<RetrievalService>>,
 }
 
 impl BackgroundTasksService {
@@ -143,7 +145,13 @@ impl BackgroundTasksService {
         ai: Arc<AIService>,
         queue: Option<JobQueue>,
     ) -> Self {
-        Self::with_events(db, storage, ai, queue, None, true)
+        let retrieval = Arc::new(RetrievalService::new(
+            db.clone(),
+            storage.clone(),
+            ai.clone(),
+            None,
+        ));
+        Self::with_events(db, storage, ai, queue, None, true, Some(retrieval))
     }
 
     pub fn with_events(
@@ -153,6 +161,7 @@ impl BackgroundTasksService {
         queue: Option<JobQueue>,
         events: Option<EventBus>,
         auto_generate_chapters: bool,
+        retrieval: Option<Arc<RetrievalService>>,
     ) -> Self {
         let (local_tx, local_rx) = if queue.is_none() {
             let (tx, rx) = mpsc::unbounded_channel();
@@ -168,6 +177,7 @@ impl BackgroundTasksService {
             local_tx,
             event_tx: events.map(spawn_event_worker),
             auto_generate_chapters,
+            retrieval,
         };
         if let Some(mut rx) = local_rx {
             let worker = service.clone();
@@ -1216,6 +1226,23 @@ impl BackgroundTasksService {
 
         self.complete_job(job_id, None).await;
         let tenant_id = self.tenant_for_job(user_id, job_id).await;
+        if let Some(retrieval) = &self.retrieval
+            && let Err(e) = retrieval
+                .index_chapter(
+                    tenant_id.as_deref(),
+                    &subject,
+                    chapter,
+                    &pages,
+                    &manifest.scenes,
+                )
+                .await
+        {
+            tracing::warn!(
+                error = format!("{e:#}"),
+                chapter_id = %chapter.id,
+                "Failed to index chapter embeddings"
+            );
+        }
         self.emit(
             "chapter.ready",
             &ChapterReady {

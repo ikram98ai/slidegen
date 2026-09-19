@@ -259,7 +259,7 @@ pub fn retrieve_paragraphs<'a>(
     scored.into_iter().take(k).map(|(p, _)| p).collect()
 }
 
-fn first_quotable_span(text: &str) -> Option<String> {
+pub fn first_quotable_span(text: &str) -> Option<String> {
     let collapsed = collapsed_ws(text);
     if collapsed.len() < MIN_QUOTE_CHARS {
         return None;

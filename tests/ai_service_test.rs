@@ -273,3 +273,49 @@ async fn generate_slide_audio_fails_on_invalid_base64() {
     let err = svc.generate_slide_audio("Hello").await.unwrap_err();
     assert!(err.to_string().contains("base64"), "got: {err}");
 }
+
+#[tokio::test]
+async fn embed_texts_parses_batch_response() {
+    use slidegen::services::ai::EmbedTask;
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/test-embed:batchEmbedContents"))
+        .and(header("x-goog-api-key", "test-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "embeddings": [
+                { "values": [0.1, 0.2] },
+                { "values": [0.3, 0.4] }
+            ]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let svc = AIService::with_config("test-key", "test-model", server.uri())
+        .with_embedding_model("test-embed", 2);
+    let vectors = svc
+        .embed_texts(&["a".into(), "b".into()], EmbedTask::Document)
+        .await
+        .unwrap();
+    assert_eq!(vectors, vec![vec![0.1, 0.2], vec![0.3, 0.4]]);
+}
+
+#[tokio::test]
+async fn answer_from_citations_parses_json() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(text_response(
+            r#"{"answer":"A packet is a box.","citation_ids":["p12-2"]}"#,
+        )))
+        .mount(&server)
+        .await;
+
+    let svc = service_for(&server);
+    let out = svc
+        .answer_from_citations("what is a packet?", "[p12-2] Quote: A packet is a box.")
+        .await
+        .unwrap();
+    assert_eq!(out.answer, "A packet is a box.");
+    assert_eq!(out.citation_ids, ["p12-2"]);
+}

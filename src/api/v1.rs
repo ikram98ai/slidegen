@@ -17,8 +17,11 @@ use crate::api::chapters::{ChapterEmbedResponse, GenerativeResponse};
 use crate::api::extractors::ServiceAuth;
 use crate::error::AppError;
 use crate::models::{
-    ChapterResponse, IngestBookRequest, IngestBookResponse, JobResponse, Subject,
+    ChapterResponse, IngestBookRequest, IngestBookResponse, JobResponse, SceneSpec, Subject,
     SubjectDetailResponse, SubjectResponse, SubjectType,
+};
+use crate::services::retrieval::{
+    AskRequest, AskResponse, SearchHit, SearchRequest, SearchResponse,
 };
 
 const EMBED_TTL_SECS: u64 = 3600;
@@ -38,6 +41,19 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/books/{book_id}/chapters/{chapter_id}/generate",
             post(generate_chapter),
+        )
+        .route("/books/{book_id}/search", post(search_book))
+        .route(
+            "/books/{book_id}/chapters/{chapter_id}/ask",
+            post(ask_chapter),
+        )
+        .route(
+            "/books/{book_id}/chapters/{chapter_id}/scenes/{scene_id}",
+            get(get_scene),
+        )
+        .route(
+            "/books/{book_id}/paragraphs/{paragraph_id}",
+            get(get_paragraph),
         )
 }
 
@@ -545,6 +561,161 @@ pub async fn generate_chapter(
         message: "Chapter generation started".to_string(),
         job_id: Some(job.id),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/books/{book_id}/search",
+    params(("book_id" = String, Path, description = "Book ID")),
+    request_body = SearchRequest,
+    responses(
+        (status = 200, description = "Cited passages", body = SearchResponse),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn search_book(
+    State(state): State<Arc<AppState>>,
+    Path(book_id): Path<String>,
+    service: ServiceAuth,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<SearchResponse>, AppError> {
+    if payload.query.trim().is_empty() {
+        return Err(AppError::BadRequest("query is required".to_string()));
+    }
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let chapter = if let Some(chapter_id) = payload.chapter_id.as_deref() {
+        Some(
+            state
+                .db
+                .get_chapter(&subject.id, chapter_id)
+                .await
+                .map_err(AppError::InternalServerError)?
+                .ok_or_else(|| AppError::NotFound("Chapter not found".to_string()))?,
+        )
+    } else {
+        None
+    };
+    let hits = state
+        .retrieval
+        .search(
+            &subject,
+            chapter.as_ref(),
+            payload.query.trim(),
+            payload.limit.unwrap_or(8),
+        )
+        .await
+        .map_err(AppError::InternalServerError)?;
+    Ok(Json(SearchResponse { hits }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/books/{book_id}/chapters/{chapter_id}/ask",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    request_body = AskRequest,
+    responses(
+        (status = 200, description = "Grounded answer with citations", body = AskResponse),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn ask_chapter(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter_id)): Path<(String, String)>,
+    service: ServiceAuth,
+    Json(payload): Json<AskRequest>,
+) -> Result<Json<AskResponse>, AppError> {
+    if payload.question.trim().is_empty() {
+        return Err(AppError::BadRequest("question is required".to_string()));
+    }
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let chapter = state
+        .db
+        .get_chapter(&subject.id, &chapter_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Chapter not found".to_string()))?;
+    let response = state
+        .retrieval
+        .ask(&subject, Some(&chapter), payload.question.trim())
+        .await
+        .map_err(AppError::InternalServerError)?;
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}/chapters/{chapter_id}/scenes/{scene_id}",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID"),
+        ("scene_id" = String, Path, description = "Scene ID")
+    ),
+    responses(
+        (status = 200, description = "Scene spec", body = SceneSpec),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_scene(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter_id, scene_id)): Path<(String, String, String)>,
+    service: ServiceAuth,
+) -> Result<Json<SceneSpec>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    state
+        .retrieval
+        .get_scene(&subject, &chapter_id, &scene_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .map(Json)
+        .ok_or_else(|| AppError::NotFound("Scene not found".to_string()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}/paragraphs/{paragraph_id}",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("paragraph_id" = String, Path, description = "Paragraph ID, e.g. p12-2")
+    ),
+    responses(
+        (status = 200, description = "Cited paragraph", body = SearchHit),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_paragraph(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, paragraph_id)): Path<(String, String)>,
+    service: ServiceAuth,
+) -> Result<Json<SearchHit>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    state
+        .retrieval
+        .get_citation(&subject, &paragraph_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .map(Json)
+        .ok_or_else(|| AppError::NotFound("Paragraph not found".to_string()))
 }
 
 async fn signed_embed(
