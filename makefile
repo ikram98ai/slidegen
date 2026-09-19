@@ -74,6 +74,23 @@ deploy:
 deploy-worker:
 	cargo lambda deploy --binary-name worker --region us-east-1 slidegen-worker
 
+### Fargate Spot worker (same `worker` binary; Lambda path stays for local/dev)
+docker-worker:
+	docker build -t slidegen-worker:latest .
+
+run-worker:
+	cargo run --bin worker
+
+# Register the task (replace ACCOUNT_ID / image / secrets in the JSON first):
+#   aws ecs register-task-definition --cli-input-json file://deploy/fargate-worker.json
+# Run with Fargate Spot and scale to 0 on an empty queue:
+#   aws ecs create-service --cluster slidegen --service-name slidegen-worker \
+#     --task-definition slidegen-worker --desired-count 0 --capacity-provider-strategy \
+#     capacityProvider=FARGATE_SPOT,weight=1 --network-configuration ...
+#   aws application-autoscaling register-scalable-target --service-namespace ecs \
+#     --resource-id service/slidegen/slidegen-worker --scalable-dimension ecs:service:DesiredCount \
+#     --min-capacity 0 --max-capacity 4
+
 ### Invoke on AWS
 aws-invoke:
 	cargo lambda invoke --remote slidegen-lambda --data-ascii "{}"

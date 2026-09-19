@@ -1,0 +1,40 @@
+{
+  "family": "slidegen-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/slidegen-ecs-execution",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/slidegen-worker-task",
+  "runtimePlatform": {
+    "cpuArchitecture": "ARM64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/slidegen-worker:latest",
+      "essential": true,
+      "stopTimeout": 120,
+      "environment": [
+        { "name": "S3_BUCKET_NAME", "value": "slidegen-files" },
+        { "name": "JOBS_QUEUE_URL", "value": "https://sqs.us-east-1.amazonaws.com/ACCOUNT_ID/slidegen-jobs" },
+        { "name": "SECRET_KEY", "value": "CHANGE_ME" },
+        { "name": "GEMINI_API_KEY", "value": "CHANGE_ME" },
+        { "name": "TEXT_MODEL", "value": "gemini-2.5-flash" },
+        { "name": "DEBUG", "value": "false" },
+        { "name": "WORKER_WAIT_SECONDS", "value": "20" },
+        { "name": "WORKER_VISIBILITY_SECONDS", "value": "900" },
+        { "name": "WORKER_MAX_MESSAGES", "value": "1" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/slidegen/worker",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}

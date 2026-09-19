@@ -124,6 +124,54 @@ impl JobQueue {
             .context("Failed to enqueue job to SQS")?;
         Ok(())
     }
+
+    pub async fn receive(
+        &self,
+        max_messages: i32,
+        wait_seconds: i32,
+        visibility_timeout: i32,
+    ) -> Result<Vec<QueueMessage>> {
+        let resp = self
+            .client
+            .receive_message()
+            .queue_url(&self.queue_url)
+            .max_number_of_messages(max_messages)
+            .wait_time_seconds(wait_seconds)
+            .visibility_timeout(visibility_timeout)
+            .send()
+            .await
+            .context("Failed to receive SQS messages")?;
+        Ok(resp
+            .messages
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|m| {
+                Some(QueueMessage {
+                    message_id: m.message_id.unwrap_or_default(),
+                    receipt_handle: m.receipt_handle?,
+                    body: m.body.unwrap_or_default(),
+                })
+            })
+            .collect())
+    }
+
+    pub async fn delete(&self, receipt_handle: &str) -> Result<()> {
+        self.client
+            .delete_message()
+            .queue_url(&self.queue_url)
+            .receipt_handle(receipt_handle)
+            .send()
+            .await
+            .context("Failed to delete SQS message")?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueMessage {
+    pub message_id: String,
+    pub receipt_handle: String,
+    pub body: String,
 }
 
 #[derive(Clone)]
