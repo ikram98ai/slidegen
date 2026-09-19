@@ -68,6 +68,7 @@ impl Modify for SecurityAddon {
         api::chapters::update_chapter,
         api::chapters::delete_chapter,
         api::chapters::generate_slides,
+        api::chapters::generate_chapter,
         api::chapters::get_chapter_embed,
         api::chapters::get_chapter_slides,
         api::chapters::update_slide,

@@ -148,7 +148,7 @@ export const chaptersApi = {
     subjectId: string,
     chapterId: string
   ): Promise<void> => {
-    await api.post(`/chapters/${subjectId}/${chapterId}/generate`);
+    await api.post(`/chapters/${subjectId}/${chapterId}/slides/generate`);
   },
   generateChapter: async (
     subjectId: string,

@@ -10,6 +10,7 @@ use axum::{
 use chrono::Utc;
 use serde::Serialize;
 use std::sync::Arc;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -106,6 +107,11 @@ async fn create_book_and_start(
         .unwrap_or(subject);
 
     subject.job_id = Some(job.id.clone());
+    state
+        .db
+        .save_subject(&subject)
+        .await
+        .map_err(AppError::InternalServerError)?;
     Ok(IngestBookResponse {
         book: SubjectResponse::from(subject),
         job: JobResponse::from(job),
@@ -250,6 +256,11 @@ pub async fn upload_book(
         .map_err(AppError::InternalServerError)?
         .unwrap_or(subject);
     subject.job_id = Some(job.id.clone());
+    state
+        .db
+        .save_subject(&subject)
+        .await
+        .map_err(AppError::InternalServerError)?;
 
     Ok((
         StatusCode::CREATED,
@@ -491,11 +502,23 @@ pub async fn get_chapter_embed(
     if chapter.package_key.is_none() {
         return Err(AppError::NotFound("Chapter package not ready".to_string()));
     }
-    let html_key = state
+    let html_key = match state
         .bg_tasks
         .refresh_chapter_package(&chapter.user_id, &subject.id, &chapter.id, EMBED_TTL_SECS)
         .await
-        .unwrap_or_else(|_| chapter.package_key.clone().unwrap_or_default());
+    {
+        Ok(key) => key,
+        Err(e) => {
+            warn!(
+                error = format!("{e:#}"),
+                chapter_id, "Falling back to stored chapter HTML"
+            );
+            chapter
+                .package_key
+                .clone()
+                .ok_or_else(|| AppError::NotFound("Chapter package not ready".to_string()))?
+        }
+    };
     let embed_url = state
         .storage
         .get_presigned_url(&html_key, EMBED_TTL_SECS)

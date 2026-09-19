@@ -27,7 +27,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/{subject_id}/{chapter_id}/slides/generate",
             post(generate_slides),
         )
-        .route("/{subject_id}/{chapter_id}/generate", post(generate_slides))
+        .route("/{subject_id}/{chapter_id}/generate", post(generate_chapter))
         .route("/{subject_id}/{chapter_id}/embed", get(get_chapter_embed))
         .route("/{chapter_id}/slides", get(get_chapter_slides))
         .route("/{chapter_id}/slides/{slide_id}", patch(update_slide))
@@ -233,7 +233,7 @@ const EMBED_TTL_SECS: u64 = 3600;
         ("chapter_id" = String, Path, description = "Chapter ID")
     ),
     responses(
-        (status = 200, description = "Successfully triggered interactive chapter generation", body = GenerativeResponse),
+        (status = 200, description = "Successfully triggered slide generation", body = GenerativeResponse),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Forbidden"),
         (status = 404, description = "Not found")
@@ -248,23 +248,49 @@ pub async fn generate_slides(
     Path((subject_id, chapter_id)): Path<(String, String)>,
     AuthUser(current_user): AuthUser,
 ) -> Result<Json<GenerativeResponse>, AppError> {
-    let chapter = match state.db.get_chapter(&subject_id, &chapter_id).await {
-        Ok(Some(c)) => c,
-        _ => return Err(AppError::NotFound("Chapter not found".to_string())),
-    };
+    let mut chapter = load_owned_chapter(&state, &subject_id, &chapter_id, &current_user.id).await?;
+    mark_chapter_processing(&state, &mut chapter).await;
 
-    if current_user.id != chapter.user_id {
-        return Err(AppError::Forbidden(
-            "You do not have permission to generate slides for this chapter".to_string(),
-        ));
-    }
+    let job = state
+        .bg_tasks
+        .start_generate_slides(current_user.id.clone(), None, subject_id, chapter_id)
+        .await
+        .map_err(AppError::InternalServerError)?;
 
-    let mut chapter_to_process = chapter;
-    chapter_to_process.processing_status = Some("processing".to_string());
-    chapter_to_process.processed_slides = None;
-    chapter_to_process.total_slides = None;
-    chapter_to_process.updated_at = Utc::now();
-    let _ = state.db.save_chapter(&chapter_to_process).await;
+    chapter.job_id = Some(job.id.clone());
+    let _ = state.db.save_chapter(&chapter).await;
+
+    Ok(Json(GenerativeResponse {
+        message: "Slide generation started".to_string(),
+        job_id: Some(job.id),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/chapters/{subject_id}/{chapter_id}/generate",
+    params(
+        ("subject_id" = String, Path, description = "Subject ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    responses(
+        (status = 200, description = "Successfully triggered interactive chapter generation", body = GenerativeResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Chapters",
+    security(
+        ("bearerAuth" = [])
+    )
+)]
+pub async fn generate_chapter(
+    State(state): State<Arc<AppState>>,
+    Path((subject_id, chapter_id)): Path<(String, String)>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<GenerativeResponse>, AppError> {
+    let mut chapter = load_owned_chapter(&state, &subject_id, &chapter_id, &current_user.id).await?;
+    mark_chapter_processing(&state, &mut chapter).await;
 
     let job = state
         .bg_tasks
@@ -272,13 +298,39 @@ pub async fn generate_slides(
         .await
         .map_err(AppError::InternalServerError)?;
 
-    chapter_to_process.job_id = Some(job.id.clone());
-    let _ = state.db.save_chapter(&chapter_to_process).await;
+    chapter.job_id = Some(job.id.clone());
+    let _ = state.db.save_chapter(&chapter).await;
 
     Ok(Json(GenerativeResponse {
         message: "Chapter generation started".to_string(),
         job_id: Some(job.id),
     }))
+}
+
+async fn load_owned_chapter(
+    state: &AppState,
+    subject_id: &str,
+    chapter_id: &str,
+    user_id: &str,
+) -> Result<Chapter, AppError> {
+    let chapter = match state.db.get_chapter(subject_id, chapter_id).await {
+        Ok(Some(c)) => c,
+        _ => return Err(AppError::NotFound("Chapter not found".to_string())),
+    };
+    if user_id != chapter.user_id {
+        return Err(AppError::Forbidden(
+            "You do not have permission to generate content for this chapter".to_string(),
+        ));
+    }
+    Ok(chapter)
+}
+
+async fn mark_chapter_processing(state: &AppState, chapter: &mut Chapter) {
+    chapter.processing_status = Some("processing".to_string());
+    chapter.processed_slides = None;
+    chapter.total_slides = None;
+    chapter.updated_at = Utc::now();
+    let _ = state.db.save_chapter(chapter).await;
 }
 
 #[utoipa::path(

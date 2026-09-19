@@ -247,6 +247,11 @@ pub async fn upload_subject(
 
     let mut subject = subject;
     subject.job_id = Some(job.id);
+    state
+        .db
+        .save_subject(&subject)
+        .await
+        .map_err(AppError::InternalServerError)?;
     Ok(Json(SubjectResponse::from(subject)))
 }
 
@@ -334,6 +339,11 @@ pub async fn reprocess_subject(
         .map_err(AppError::InternalServerError)?;
 
     subject.job_id = Some(job.id);
+    state
+        .db
+        .save_subject(&subject)
+        .await
+        .map_err(AppError::InternalServerError)?;
     Ok(Json(SubjectResponse::from(subject)))
 }
 
