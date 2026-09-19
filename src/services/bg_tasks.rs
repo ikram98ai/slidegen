@@ -2,12 +2,13 @@ use crate::config::Settings;
 use crate::db::Database;
 use crate::models::{
     Chapter, ChapterManifest, JobRecord, JobStage, JobStatus, SceneSpec, Slide, Subject,
-    chapter_audio_key, chapter_manifest_key, chapter_package_html_key,
+    SubjectType, chapter_audio_key, chapter_manifest_key, chapter_package_html_key,
 };
 use crate::services::citations::{
     ParagraphIndex, ground_scenes, ground_scenes_against_text, prompt_from_pages, prompt_from_plan,
 };
 use crate::services::compiler::compile_chapter;
+use crate::services::events::{BookProcessed, ChapterReady, EventBus, JobFailed};
 use crate::services::extract::{
     self, ExtractManifest, ExtractedPage, arabic_from_label, extract_prefix, manifest_object_key,
     page_object_key,
@@ -19,7 +20,24 @@ use dotext::*;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+fn spawn_event_worker(bus: EventBus) -> mpsc::UnboundedSender<(String, serde_json::Value)> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<(String, serde_json::Value)>();
+    tokio::spawn(async move {
+        while let Some((detail_type, detail)) = rx.recv().await {
+            if let Err(e) = bus.publish(&detail_type, &detail).await {
+                tracing::warn!(
+                    error = format!("{e:#}"),
+                    detail_type,
+                    "Failed to publish EventBridge event"
+                );
+            }
+        }
+    });
+    tx
+}
 
 /// Truncates a string to at most `max_bytes` without splitting a UTF-8
 /// character (a plain `&s[..max_bytes]` panics on non-ASCII boundaries).
@@ -57,6 +75,18 @@ pub enum Job {
         user_id: String,
         subject_id: String,
         chapter_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
+    },
+    /// Sibling services can drop this on the jobs queue instead of calling HTTP.
+    IngestBook {
+        tenant_id: String,
+        title: String,
+        #[serde(rename = "book_type")]
+        book_type: SubjectType,
+        file_s3path: String,
+        #[serde(default)]
+        is_public: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_id: Option<String>,
     },
@@ -101,6 +131,9 @@ pub struct BackgroundTasksService {
     storage: Arc<StorageService>,
     ai: Arc<AIService>,
     queue: Option<JobQueue>,
+    local_tx: Option<mpsc::UnboundedSender<Job>>,
+    event_tx: Option<mpsc::UnboundedSender<(String, serde_json::Value)>>,
+    auto_generate_chapters: bool,
 }
 
 impl BackgroundTasksService {
@@ -110,12 +143,41 @@ impl BackgroundTasksService {
         ai: Arc<AIService>,
         queue: Option<JobQueue>,
     ) -> Self {
-        Self {
+        Self::with_events(db, storage, ai, queue, None, true)
+    }
+
+    pub fn with_events(
+        db: Arc<Database>,
+        storage: Arc<StorageService>,
+        ai: Arc<AIService>,
+        queue: Option<JobQueue>,
+        events: Option<EventBus>,
+        auto_generate_chapters: bool,
+    ) -> Self {
+        let (local_tx, local_rx) = if queue.is_none() {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+        let service = Self {
             db,
             storage,
             ai,
             queue,
+            local_tx,
+            event_tx: events.map(spawn_event_worker),
+            auto_generate_chapters,
+        };
+        if let Some(mut rx) = local_rx {
+            let worker = service.clone();
+            tokio::spawn(async move {
+                while let Some(job) = rx.recv().await {
+                    let _ = worker.run_job(job).await;
+                }
+            });
         }
+        service
     }
 
     /// Creates a tracked job row and hands the work to SQS / in-process.
@@ -194,23 +256,19 @@ impl BackgroundTasksService {
 
     /// Hands a job off for background execution: to SQS when a queue is
     /// configured (required on Lambda, where in-process tasks stall once the
-    /// response is sent), otherwise to an in-process tokio task.
+    /// response is sent), otherwise to the in-process job channel.
     pub async fn dispatch(&self, job: Job) -> Result<()> {
-        match &self.queue {
-            Some(queue) => {
-                tracing::info!(?job, "Dispatching job to SQS");
-                queue.send(&job).await
-            }
-            None => {
-                tracing::info!(?job, "Running job in-process");
-                let service = self.clone();
-                tokio::spawn(async move {
-                    // Failures are logged and persisted as "failed" status inside run_job.
-                    let _ = service.run_job(job).await;
-                });
-                Ok(())
-            }
+        if let Some(queue) = &self.queue {
+            tracing::info!(?job, "Dispatching job to SQS");
+            return queue.send(&job).await;
         }
+        if let Some(tx) = &self.local_tx {
+            tracing::info!(?job, "Running job in-process");
+            tx.send(job)
+                .map_err(|_| anyhow::anyhow!("in-process job worker dropped"))?;
+            return Ok(());
+        }
+        anyhow::bail!("no job queue or in-process worker configured")
     }
 
     /// Executes a job to completion. On failure the related entity is marked
@@ -254,6 +312,17 @@ impl BackgroundTasksService {
                 self.generate_chapter_bg(user_id, subject_id, chapter, job_id)
                     .await
             }
+            Job::IngestBook {
+                tenant_id,
+                title,
+                book_type,
+                file_s3path,
+                is_public,
+                job_id,
+            } => {
+                self.ingest_book_bg(tenant_id, title, book_type, file_s3path, is_public, job_id)
+                    .await
+            }
         }
     }
 
@@ -280,6 +349,17 @@ impl BackgroundTasksService {
                 "Failed to process subject background task"
             );
             self.fail_job(job_id.as_deref(), &e).await;
+            self.emit(
+                "job.failed",
+                &JobFailed {
+                    job_id: job_id.clone(),
+                    kind: "process_subject".into(),
+                    error: format!("{e:#}"),
+                    book_id: Some(subject_id.clone()),
+                    chapter_id: None,
+                },
+            )
+            .await;
             if let Ok(Some(mut subject)) = self.db.get_subject(&subject_id).await {
                 subject.processing_status = "failed".to_string();
                 subject.processing_stage = Some(JobStage::Failed.as_str().to_string());
@@ -634,7 +714,137 @@ impl BackgroundTasksService {
         }
 
         self.complete_job(job_id, Some(chapters_total)).await;
+        let tenant_id = self.tenant_for_job(user_id, job_id).await;
+        self.emit(
+            "book.processed",
+            &BookProcessed {
+                book_id: subject_id.to_string(),
+                user_id: user_id.to_string(),
+                tenant_id: tenant_id.clone(),
+                job_id: job_id.map(str::to_string),
+                chapters_total,
+            },
+        )
+        .await;
+        self.maybe_enqueue_next(user_id, tenant_id, subject_id, "first chapter after TOC")
+            .await;
         Ok(())
+    }
+
+    async fn ingest_book_bg(
+        &self,
+        tenant_id: String,
+        title: String,
+        subject_type: SubjectType,
+        file_s3path: String,
+        is_public: bool,
+        job_id: Option<String>,
+    ) -> Result<()> {
+        let user_id = format!("tenant:{tenant_id}");
+        let subject_id = Uuid::new_v4().to_string();
+        let subject = Subject {
+            id: subject_id.clone(),
+            user_id: user_id.clone(),
+            title,
+            file_path: file_s3path.clone(),
+            is_public,
+            r#type: subject_type,
+            processing_status: "processing".to_string(),
+            processed_pages: None,
+            total_pages: None,
+            job_id: job_id.clone(),
+            processing_stage: Some(JobStage::Queued.as_str().to_string()),
+            extract_prefix: None,
+            page_offset: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        self.db
+            .save_subject(&subject)
+            .await
+            .context("Failed to save ingested subject")?;
+        self.process_subject_bg(user_id, subject_id, file_s3path, job_id)
+            .await
+    }
+
+    async fn maybe_enqueue_next(
+        &self,
+        user_id: &str,
+        tenant_id: Option<String>,
+        subject_id: &str,
+        label: &str,
+    ) {
+        if !self.auto_generate_chapters {
+            return;
+        }
+        if let Err(e) = self
+            .enqueue_next_chapter(user_id, tenant_id, subject_id)
+            .await
+        {
+            tracing::warn!(
+                error = format!("{e:#}"),
+                subject_id,
+                reason = label,
+                "Failed to enqueue sequential chapter"
+            );
+        }
+    }
+
+    async fn enqueue_next_chapter(
+        &self,
+        user_id: &str,
+        tenant_id: Option<String>,
+        subject_id: &str,
+    ) -> Result<()> {
+        let mut chapters = self.db.get_chapters_by_subject(subject_id).await?;
+        chapters.sort_by_key(|c| c.order_index);
+        let Some(next) = chapters.into_iter().find(|c| {
+            c.package_key.is_none()
+                && matches!(c.processing_status.as_deref(), None | Some("completed"))
+        }) else {
+            return Ok(());
+        };
+
+        if let Ok(Some(mut chapter)) = self.db.get_chapter(subject_id, &next.id).await {
+            chapter.processing_status = Some("processing".to_string());
+            chapter.processed_slides = None;
+            chapter.total_slides = None;
+            chapter.updated_at = Utc::now();
+            let _ = self.db.save_chapter(&chapter).await;
+        }
+
+        self.start_generate_chapter(
+            user_id.to_string(),
+            tenant_id,
+            subject_id.to_string(),
+            next.id,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn tenant_for_job(&self, user_id: &str, job_id: Option<&str>) -> Option<String> {
+        if let Some(id) = job_id
+            && let Ok(Some(job)) = self.db.get_job(id).await
+            && let Some(tenant) = job.tenant_id
+        {
+            return Some(tenant);
+        }
+        user_id.strip_prefix("tenant:").map(str::to_string)
+    }
+
+    async fn emit<T: serde::Serialize>(&self, detail_type: &str, detail: &T) {
+        let Some(tx) = &self.event_tx else {
+            return;
+        };
+        match serde_json::to_value(detail) {
+            Ok(value) => {
+                if tx.send((detail_type.to_string(), value)).is_err() {
+                    tracing::warn!(detail_type, "Event worker dropped; event not published");
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, detail_type, "Failed to serialize event"),
+        }
     }
 
     pub async fn generate_slides_bg(
@@ -806,6 +1016,17 @@ impl BackgroundTasksService {
                 "Failed to generate chapter background task"
             );
             self.fail_job(job_id.as_deref(), &e).await;
+            self.emit(
+                "job.failed",
+                &JobFailed {
+                    job_id: job_id.clone(),
+                    kind: "generate_chapter".into(),
+                    error: format!("{e:#}"),
+                    book_id: Some(subject_id.clone()),
+                    chapter_id: Some(chapter.id.clone()),
+                },
+            )
+            .await;
             if let Ok(Some(mut c)) = self.db.get_chapter(&subject_id, &chapter.id).await {
                 c.processing_status = Some("failed".to_string());
                 let _ = self.db.save_chapter(&c).await;
@@ -985,7 +1206,7 @@ impl BackgroundTasksService {
 
         if let Some(mut c) = self.db.get_chapter(subject_id, &chapter.id).await? {
             c.processing_status = Some("completed".to_string());
-            c.package_key = Some(html_key);
+            c.package_key = Some(html_key.clone());
             c.updated_at = Utc::now();
             self.db
                 .save_chapter(&c)
@@ -994,6 +1215,21 @@ impl BackgroundTasksService {
         }
 
         self.complete_job(job_id, None).await;
+        let tenant_id = self.tenant_for_job(user_id, job_id).await;
+        self.emit(
+            "chapter.ready",
+            &ChapterReady {
+                book_id: subject_id.to_string(),
+                chapter_id: chapter.id.clone(),
+                user_id: user_id.to_string(),
+                tenant_id: tenant_id.clone(),
+                job_id: job_id.map(str::to_string),
+                package_key: html_key,
+            },
+        )
+        .await;
+        self.maybe_enqueue_next(user_id, tenant_id, subject_id, "next chapter")
+            .await;
         Ok(())
     }
 

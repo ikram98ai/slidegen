@@ -9,22 +9,7 @@ use slidegen::services::auth::{
 };
 
 fn test_settings() -> Settings {
-    Settings {
-        aws_access_key_id: None,
-        aws_secret_access_key: None,
-        aws_region: "us-east-1".to_string(),
-        s3_bucket_name: "test-bucket".to_string(),
-        jobs_queue_url: None,
-        debug: true,
-        secret_key: "unit-test-secret-key".to_string(),
-        algorithm: "HS256".to_string(),
-        access_token_expire_days: 7,
-        refresh_token_expire_days: 30,
-        service_api_keys: vec![],
-        gemini_api_key: None,
-        text_model: "test-model".to_string(),
-        embedding_model: "test-embedding".to_string(),
-    }
+    Settings::for_tests()
 }
 
 #[test]

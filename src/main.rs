@@ -10,6 +10,7 @@ use slidegen::api;
 use slidegen::config::Settings;
 use slidegen::db::Database;
 use slidegen::services::bg_tasks::JobQueue;
+use slidegen::services::events::EventBus;
 use slidegen::services::{AIService, BackgroundTasksService, StorageService};
 
 use utoipa::{
@@ -72,6 +73,12 @@ impl Modify for SecurityAddon {
         api::jobs::get_job,
         api::v1::upload_book,
         api::v1::ingest_book,
+        api::v1::get_job,
+        api::v1::get_book,
+        api::v1::list_chapters,
+        api::v1::get_chapter,
+        api::v1::get_chapter_embed,
+        api::v1::generate_chapter,
     ),
     components(
         schemas(
@@ -97,6 +104,7 @@ impl Modify for SecurityAddon {
             slidegen::models::JobResponse,
             slidegen::models::IngestBookRequest,
             slidegen::models::IngestBookResponse,
+            api::v1::ServiceChapterResponse,
         ),
     ),
     tags(
@@ -160,11 +168,15 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let bg_tasks = Arc::new(BackgroundTasksService::new(
+    let events = EventBus::from_settings(&settings).await;
+    let auto_generate = settings.auto_generate_chapters;
+    let bg_tasks = Arc::new(BackgroundTasksService::with_events(
         db.clone(),
         storage.clone(),
         ai.clone(),
         job_queue,
+        events,
+        auto_generate,
     ));
 
     let shared_state = Arc::new(AppState {

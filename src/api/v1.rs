@@ -3,25 +3,42 @@
 
 use axum::{
     Json, Router,
-    extract::{Multipart, State},
+    extract::{Multipart, Path, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
 };
 use chrono::Utc;
+use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::api::chapters::{ChapterEmbedResponse, GenerativeResponse};
 use crate::api::extractors::ServiceAuth;
 use crate::error::AppError;
 use crate::models::{
-    IngestBookRequest, IngestBookResponse, JobResponse, Subject, SubjectResponse, SubjectType,
+    ChapterResponse, IngestBookRequest, IngestBookResponse, JobResponse, Subject,
+    SubjectDetailResponse, SubjectResponse, SubjectType,
 };
+
+const EMBED_TTL_SECS: u64 = 3600;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/books", post(upload_book))
         .route("/books/ingest", post(ingest_book))
+        .route("/jobs/{job_id}", get(get_job))
+        .route("/books/{book_id}", get(get_book))
+        .route("/books/{book_id}/chapters", get(list_chapters))
+        .route("/books/{book_id}/chapters/{chapter_id}", get(get_chapter))
+        .route(
+            "/books/{book_id}/chapters/{chapter_id}/embed",
+            get(get_chapter_embed),
+        )
+        .route(
+            "/books/{book_id}/chapters/{chapter_id}/generate",
+            post(generate_chapter),
+        )
 }
 
 async fn create_book_and_start(
@@ -261,4 +278,289 @@ pub async fn ingest_book(
     .await?;
 
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+fn tenant_owns(service: &ServiceAuth, subject: &Subject) -> bool {
+    subject.user_id == service.user_id()
+}
+
+async fn load_owned_book(
+    state: &AppState,
+    service: &ServiceAuth,
+    book_id: &str,
+) -> Result<Subject, AppError> {
+    let subject = state
+        .db
+        .get_subject(book_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Book not found".to_string()))?;
+    if !tenant_owns(service, &subject) {
+        return Err(AppError::Forbidden(
+            "You do not have permission to access this book".to_string(),
+        ));
+    }
+    Ok(subject)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/jobs/{job_id}",
+    params(("job_id" = String, Path, description = "Job ID")),
+    responses(
+        (status = 200, description = "Job progress", body = JobResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_job(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+    service: ServiceAuth,
+) -> Result<Json<JobResponse>, AppError> {
+    let job = state
+        .db
+        .get_job(&job_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Job not found".to_string()))?;
+    if job.user_id != service.user_id()
+        && job.tenant_id.as_deref() != Some(service.tenant_id.as_str())
+    {
+        return Err(AppError::Forbidden(
+            "You do not have permission to view this job".to_string(),
+        ));
+    }
+    Ok(Json(JobResponse::from(job)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}",
+    params(("book_id" = String, Path, description = "Book / subject ID")),
+    responses(
+        (status = 200, description = "Book", body = SubjectResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_book(
+    State(state): State<Arc<AppState>>,
+    Path(book_id): Path<String>,
+    service: ServiceAuth,
+) -> Result<Json<SubjectResponse>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    Ok(Json(SubjectResponse::from(subject)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}/chapters",
+    params(("book_id" = String, Path, description = "Book / subject ID")),
+    responses(
+        (status = 200, description = "Book with chapters", body = SubjectDetailResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn list_chapters(
+    State(state): State<Arc<AppState>>,
+    Path(book_id): Path<String>,
+    service: ServiceAuth,
+) -> Result<Json<SubjectDetailResponse>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let chapters = state
+        .db
+        .get_chapters_by_subject(&subject.id)
+        .await
+        .map_err(AppError::InternalServerError)?;
+    Ok(Json(SubjectDetailResponse {
+        subject: SubjectResponse::from(subject),
+        chapters: chapters.into_iter().map(ChapterResponse::from).collect(),
+    }))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ServiceChapterResponse {
+    #[serde(flatten)]
+    pub chapter: ChapterResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embed_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<u64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}/chapters/{chapter_id}",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    responses(
+        (status = 200, description = "Chapter plus optional signed embed URL", body = ServiceChapterResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_chapter(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter_id)): Path<(String, String)>,
+    service: ServiceAuth,
+) -> Result<Json<ServiceChapterResponse>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let chapter = state
+        .db
+        .get_chapter(&subject.id, &chapter_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Chapter not found".to_string()))?;
+
+    let (embed_url, expires_in) = if chapter.package_key.is_some() {
+        match signed_embed(&state, &chapter.user_id, &subject.id, &chapter.id).await {
+            Ok(url) => (Some(url), Some(EMBED_TTL_SECS)),
+            Err(_) => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
+    Ok(Json(ServiceChapterResponse {
+        chapter: ChapterResponse::from(chapter),
+        embed_url,
+        expires_in,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/books/{book_id}/chapters/{chapter_id}/embed",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    responses(
+        (status = 200, description = "Presigned iframe URL", body = ChapterEmbedResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Chapter package not ready")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn get_chapter_embed(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter_id)): Path<(String, String)>,
+    service: ServiceAuth,
+) -> Result<Json<ChapterEmbedResponse>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let chapter = state
+        .db
+        .get_chapter(&subject.id, &chapter_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Chapter not found".to_string()))?;
+    if chapter.package_key.is_none() {
+        return Err(AppError::NotFound("Chapter package not ready".to_string()));
+    }
+    let html_key = state
+        .bg_tasks
+        .refresh_chapter_package(&chapter.user_id, &subject.id, &chapter.id, EMBED_TTL_SECS)
+        .await
+        .unwrap_or_else(|_| chapter.package_key.clone().unwrap_or_default());
+    let embed_url = state
+        .storage
+        .get_presigned_url(&html_key, EMBED_TTL_SECS)
+        .await
+        .map_err(AppError::InternalServerError)?;
+    Ok(Json(ChapterEmbedResponse {
+        embed_url,
+        expires_in: EMBED_TTL_SECS,
+        package_key: html_key,
+        scene_count: chapter.total_slides.unwrap_or(0),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/books/{book_id}/chapters/{chapter_id}/generate",
+    params(
+        ("book_id" = String, Path, description = "Book ID"),
+        ("chapter_id" = String, Path, description = "Chapter ID")
+    ),
+    responses(
+        (status = 200, description = "Chapter generation started", body = GenerativeResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden"),
+        (status = 404, description = "Not found")
+    ),
+    tag = "Service",
+    security(("apiKeyAuth" = []))
+)]
+pub async fn generate_chapter(
+    State(state): State<Arc<AppState>>,
+    Path((book_id, chapter_id)): Path<(String, String)>,
+    service: ServiceAuth,
+) -> Result<Json<GenerativeResponse>, AppError> {
+    let subject = load_owned_book(&state, &service, &book_id).await?;
+    let mut chapter = state
+        .db
+        .get_chapter(&subject.id, &chapter_id)
+        .await
+        .map_err(AppError::InternalServerError)?
+        .ok_or_else(|| AppError::NotFound("Chapter not found".to_string()))?;
+    chapter.processing_status = Some("processing".to_string());
+    chapter.processed_slides = None;
+    chapter.total_slides = None;
+    chapter.updated_at = Utc::now();
+    let _ = state.db.save_chapter(&chapter).await;
+
+    let job = state
+        .bg_tasks
+        .start_generate_chapter(
+            service.user_id(),
+            Some(service.tenant_id.clone()),
+            subject.id,
+            chapter_id,
+        )
+        .await
+        .map_err(AppError::InternalServerError)?;
+
+    chapter.job_id = Some(job.id.clone());
+    let _ = state.db.save_chapter(&chapter).await;
+
+    Ok(Json(GenerativeResponse {
+        message: "Chapter generation started".to_string(),
+        job_id: Some(job.id),
+    }))
+}
+
+async fn signed_embed(
+    state: &AppState,
+    user_id: &str,
+    subject_id: &str,
+    chapter_id: &str,
+) -> Result<String, AppError> {
+    let html_key = state
+        .bg_tasks
+        .refresh_chapter_package(user_id, subject_id, chapter_id, EMBED_TTL_SECS)
+        .await
+        .map_err(AppError::InternalServerError)?;
+    state
+        .storage
+        .get_presigned_url(&html_key, EMBED_TTL_SECS)
+        .await
+        .map_err(AppError::InternalServerError)
 }

@@ -62,6 +62,27 @@ fn generate_chapter_job_roundtrips() {
 }
 
 #[test]
+fn ingest_book_job_roundtrips() {
+    let json = r#"{"type":"ingest_book","tenant_id":"khan","title":"DDIA","book_type":"book","file_s3path":"subjects/tenant:khan/b1.pdf"}"#;
+    let parsed: Job = serde_json::from_str(json).unwrap();
+    match parsed {
+        Job::IngestBook {
+            tenant_id,
+            title,
+            file_s3path,
+            is_public,
+            ..
+        } => {
+            assert_eq!(tenant_id, "khan");
+            assert_eq!(title, "DDIA");
+            assert_eq!(file_s3path, "subjects/tenant:khan/b1.pdf");
+            assert!(!is_public);
+        }
+        other => panic!("wrong variant: {other:?}"),
+    }
+}
+
+#[test]
 fn unknown_job_type_fails_to_parse() {
     let json = r#"{"type":"drop_all_tables","user_id":"u1"}"#;
     assert!(serde_json::from_str::<Job>(json).is_err());

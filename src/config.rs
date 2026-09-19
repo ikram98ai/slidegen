@@ -14,6 +14,11 @@ pub struct Settings {
     /// SQS queue for background jobs. When unset, jobs run in-process
     /// (fine locally, unreliable on Lambda).
     pub jobs_queue_url: Option<String>,
+    /// EventBridge bus for `book.processed` / `chapter.ready` fan-out.
+    pub event_bus_name: Option<String>,
+    /// After TOC analysis, enqueue the first chapter and then the next
+    /// as each package completes.
+    pub auto_generate_chapters: bool,
 
     // Security
     pub debug: bool,
@@ -47,6 +52,11 @@ impl Settings {
             aws_region: env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
             s3_bucket_name: env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set"),
             jobs_queue_url: env::var("JOBS_QUEUE_URL").ok().filter(|v| !v.is_empty()),
+            event_bus_name: env::var("EVENT_BUS_NAME").ok().filter(|v| !v.is_empty()),
+            auto_generate_chapters: env::var("AUTO_GENERATE_CHAPTERS")
+                .ok()
+                .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+                .unwrap_or(true),
 
             debug: env::var("DEBUG")
                 .unwrap_or_else(|_| "true".to_string())
@@ -77,6 +87,27 @@ impl Settings {
         self.service_api_keys
             .iter()
             .find_map(|(tenant, secret)| constant_eq(secret, key).then_some(tenant.as_str()))
+    }
+
+    pub fn for_tests() -> Self {
+        Self {
+            aws_access_key_id: None,
+            aws_secret_access_key: None,
+            aws_region: "us-east-1".into(),
+            s3_bucket_name: "test-bucket".into(),
+            jobs_queue_url: None,
+            event_bus_name: None,
+            auto_generate_chapters: true,
+            debug: true,
+            secret_key: "unit-test-secret-key".into(),
+            algorithm: "HS256".into(),
+            access_token_expire_days: 7,
+            refresh_token_expire_days: 30,
+            service_api_keys: vec![],
+            gemini_api_key: None,
+            text_model: "test-model".into(),
+            embedding_model: "test-embedding".into(),
+        }
     }
 }
 
@@ -128,22 +159,8 @@ mod tests {
 
     #[test]
     fn tenant_lookup_is_length_safe() {
-        let settings = Settings {
-            aws_access_key_id: None,
-            aws_secret_access_key: None,
-            aws_region: "us-east-1".into(),
-            s3_bucket_name: "b".into(),
-            jobs_queue_url: None,
-            debug: true,
-            secret_key: "s".into(),
-            algorithm: "HS256".into(),
-            access_token_expire_days: 1,
-            refresh_token_expire_days: 1,
-            service_api_keys: vec![("khan".into(), "sk_abc".into())],
-            gemini_api_key: None,
-            text_model: "m".into(),
-            embedding_model: "e".into(),
-        };
+        let mut settings = Settings::for_tests();
+        settings.service_api_keys = vec![("khan".into(), "sk_abc".into())];
         assert_eq!(settings.tenant_for_api_key("sk_abc"), Some("khan"));
         assert_eq!(settings.tenant_for_api_key("sk_ab"), None);
         assert_eq!(settings.tenant_for_api_key("sk_xyz"), None);

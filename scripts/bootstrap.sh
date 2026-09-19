@@ -95,6 +95,15 @@ QUEUE_ARN=$($AWS sqs get-queue-attributes --queue-url "$QUEUE_URL" \
   --attribute-names QueueArn --query 'Attributes.QueueArn' --output text)
 ok "Queue ready: $QUEUE_URL"
 
+if [[ -n "${EVENT_BUS_NAME:-}" ]]; then
+  if $AWS events describe-event-bus --name "$EVENT_BUS_NAME" >/dev/null 2>&1; then
+    ok "Event bus ready: $EVENT_BUS_NAME"
+  else
+    $AWS events create-event-bus --name "$EVENT_BUS_NAME" >/dev/null
+    ok "Event bus created: $EVENT_BUS_NAME"
+  fi
+fi
+
 # ───────────────────────────── 2. IAM role ─────────────────────────────────
 
 log "Ensuring IAM role '$ROLE_NAME'"
@@ -142,6 +151,11 @@ $AWS iam put-role-policy --role-name "$ROLE_NAME" \
         \"Action\": [\"sqs:SendMessage\", \"sqs:ReceiveMessage\", \"sqs:DeleteMessage\",
                      \"sqs:GetQueueAttributes\", \"sqs:ChangeMessageVisibility\"],
         \"Resource\": \"$QUEUE_ARN\"
+      },
+      {
+        \"Effect\": \"Allow\",
+        \"Action\": [\"events:PutEvents\"],
+        \"Resource\": \"*\"
       }
     ]
   }"
@@ -179,6 +193,11 @@ if [[ -n "${SERVICE_API_KEYS:-}" ]]; then
   SERVICE_KEYS_SUFFIX=$(printf ',"SERVICE_API_KEYS":"%s"' "$SERVICE_API_KEYS")
 fi
 
+EVENT_BUS_SUFFIX=""
+if [[ -n "${EVENT_BUS_NAME:-}" ]]; then
+  EVENT_BUS_SUFFIX=$(printf ',"EVENT_BUS_NAME":"%s"' "$EVENT_BUS_NAME")
+fi
+
 shared_env() {
   printf '{"S3_BUCKET_NAME":"%s","SECRET_KEY":"%s","GEMINI_API_KEY":"%s","TEXT_MODEL":"%s","DEBUG":"false"%s%s}' \
     "$S3_BUCKET_NAME" "$SECRET_KEY" "$GEMINI_API_KEY" "$TEXT_MODEL" "$SERVICE_KEYS_SUFFIX" "$1"
@@ -188,7 +207,7 @@ log "Configuring API function (env vars, 30s timeout, 512MB)"
 $AWS lambda update-function-configuration \
   --function-name "$API_FUNCTION" \
   --timeout 30 --memory-size 512 \
-  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"")}" >/dev/null
+  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX")}" >/dev/null
 $AWS lambda wait function-updated --function-name "$API_FUNCTION"
 ok "API configured"
 
@@ -196,7 +215,7 @@ log "Configuring worker function (env vars, 900s timeout, 1024MB)"
 $AWS lambda update-function-configuration \
   --function-name "$WORKER_FUNCTION" \
   --timeout 900 --memory-size 1024 \
-  --environment "{\"Variables\":$(shared_env "")}" >/dev/null
+  --environment "{\"Variables\":$(shared_env ",\"JOBS_QUEUE_URL\":\"$QUEUE_URL\"$EVENT_BUS_SUFFIX")}" >/dev/null
 $AWS lambda wait function-updated --function-name "$WORKER_FUNCTION"
 ok "Worker configured"
 
