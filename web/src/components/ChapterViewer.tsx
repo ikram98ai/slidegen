@@ -135,6 +135,7 @@ export const ChapterViewer: React.FC<ChapterViewerProps> = ({
         title={chapter.title}
         src={embed.embed_url}
         sandbox="allow-scripts"
+        allow="autoplay"
         className="w-full bg-white rounded-3xl shadow-sm border border-gray-100"
         style={{ height, minHeight: 480 }}
       />

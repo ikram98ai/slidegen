@@ -339,7 +339,15 @@ body.embed { margin: 0; }
   appearance: none; border: 1px solid var(--line); background: var(--surface-2);
   color: var(--ink-2); font: 700 12px/1 var(--f-mono); padding: 4px 8px; border-radius: 999px; cursor: pointer;
 }
-.cite:hover { border-color: var(--blue); color: var(--blue); }
+.cite { position: relative; }
+.cite:hover, .cite:focus-visible { border-color: var(--blue); color: var(--blue); }
+.cite-tip {
+  display: none; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 4;
+  min-width: 180px; max-width: 280px; padding: 8px 10px; border-radius: 10px;
+  background: var(--ink); color: var(--surface); font: 500 12.5px/1.4 var(--f-sans);
+  box-shadow: 0 8px 24px rgba(19, 26, 43, 0.18); text-align: left; white-space: normal;
+}
+.cite:hover .cite-tip, .cite:focus-visible .cite-tip { display: block; }
 .icon-btn {
   appearance: none; width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--surface); color: var(--ink); font: 700 14px/1 var(--f-display); cursor: pointer;

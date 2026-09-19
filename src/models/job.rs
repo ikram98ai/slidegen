@@ -47,7 +47,9 @@ pub enum JobStage {
     ExtractingPages,
     AnalyzingToc,
     GeneratingSlides,
+    PlanningScenes,
     GeneratingScenes,
+    VerifyingCitations,
     Completed,
     Failed,
 }
@@ -59,7 +61,9 @@ impl JobStage {
             Self::ExtractingPages => "extracting_pages",
             Self::AnalyzingToc => "analyzing_toc",
             Self::GeneratingSlides => "generating_slides",
+            Self::PlanningScenes => "planning_scenes",
             Self::GeneratingScenes => "generating_scenes",
+            Self::VerifyingCitations => "verifying_citations",
             Self::Completed => "completed",
             Self::Failed => "failed",
         }

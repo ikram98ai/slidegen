@@ -143,6 +143,35 @@ async fn generate_slides_parses_completion() {
 }
 
 #[tokio::test]
+async fn plan_chapter_scenes_parses_paragraph_ids() {
+    let server = MockServer::start().await;
+    let completion = r#"{
+      "kid_lede": "Packets are labeled boxes.",
+      "scenes": [{
+        "id": "packets",
+        "title": "What is a packet?",
+        "focus": "A packet is a labeled box of data.",
+        "paragraph_ids": ["p14-2", "p15-1"]
+      }]
+    }"#;
+
+    Mock::given(method("POST"))
+        .and(path("/v1beta/models/test-model:generateContent"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(text_response(completion)))
+        .mount(&server)
+        .await;
+
+    let svc = service_for(&server);
+    let plan = svc
+        .plan_chapter_scenes("Packets", "[p14-2] A packet is a small labeled box.")
+        .await
+        .unwrap();
+
+    assert_eq!(plan.scenes.len(), 1);
+    assert_eq!(plan.scenes[0].paragraph_ids, vec!["p14-2", "p15-1"]);
+}
+
+#[tokio::test]
 async fn generate_chapter_parses_scene_spec() {
     let server = MockServer::start().await;
     let completion = r#"{

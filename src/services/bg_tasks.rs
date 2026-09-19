@@ -4,6 +4,9 @@ use crate::models::{
     Chapter, ChapterManifest, JobRecord, JobStage, JobStatus, SceneSpec, Slide, Subject,
     chapter_audio_key, chapter_manifest_key, chapter_package_html_key,
 };
+use crate::services::citations::{
+    ParagraphIndex, ground_scenes, ground_scenes_against_text, prompt_from_pages, prompt_from_plan,
+};
 use crate::services::compiler::compile_chapter;
 use crate::services::extract::{
     self, ExtractManifest, ExtractedPage, arabic_from_label, extract_prefix, manifest_object_key,
@@ -830,14 +833,62 @@ impl BackgroundTasksService {
             let _ = self.db.save_chapter(&c).await;
         }
 
-        let chapter_text = self.chapter_text_for_generation(&subject, chapter).await?;
+        let (chapter_text, pages) = self
+            .chapter_source_for_generation(&subject, chapter)
+            .await?;
         if chapter_text.trim().is_empty() {
             anyhow::bail!("No text extracted for chapter in {}", subject.file_path);
         }
 
+        let index = if pages.is_empty() {
+            None
+        } else {
+            Some(ParagraphIndex::from_pages(&pages))
+        };
+
+        self.mark_job_stage(job_id, JobStage::PlanningScenes).await;
+        let generate_text = match &index {
+            Some(index) if !index.is_empty() => {
+                match self
+                    .ai
+                    .plan_chapter_scenes(&chapter.title, &index.catalog())
+                    .await
+                {
+                    Ok(plan) => {
+                        let retrieved = prompt_from_plan(&plan, index);
+                        if retrieved.len() < 200 {
+                            tracing::warn!(
+                                chapter_id = %chapter.id,
+                                "Planner retrieved too little text; using full chapter extract"
+                            );
+                            chapter_text.clone()
+                        } else {
+                            tracing::info!(
+                                chapter_id = %chapter.id,
+                                scenes = plan.scenes.len(),
+                                "Generating chapter from retrieved paragraphs"
+                            );
+                            retrieved
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = format!("{e:#}"),
+                            chapter_id = %chapter.id,
+                            "Scene planner failed; using full chapter extract"
+                        );
+                        chapter_text.clone()
+                    }
+                }
+            }
+            _ => chapter_text.clone(),
+        };
+
+        self.mark_job_stage(job_id, JobStage::GeneratingScenes)
+            .await;
         let generated = self
             .ai
-            .generate_chapter(&chapter.title, &chapter_text)
+            .generate_chapter(&chapter.title, &generate_text)
             .await
             .context("AI failed to generate chapter scenes")?;
 
@@ -845,12 +896,34 @@ impl BackgroundTasksService {
             anyhow::bail!("Model returned no scenes for chapter {}", chapter.id);
         }
 
-        let scenes: Vec<SceneSpec> = generated
+        let mut scenes: Vec<SceneSpec> = generated
             .scenes
             .into_iter()
             .enumerate()
-            .map(|(idx, scene)| SceneSpec::from_generated(scene, idx, &chapter_text))
+            .map(|(idx, scene)| SceneSpec::from_generated(scene, idx))
             .collect();
+
+        self.mark_job_stage(job_id, JobStage::VerifyingCitations)
+            .await;
+        if let Some(index) = &index {
+            let stats = ground_scenes(&mut scenes, index);
+            tracing::info!(
+                chapter_id = %chapter.id,
+                verified = stats.verified,
+                repaired = stats.repaired,
+                dropped_scenes = stats.dropped_scenes,
+                "Grounded chapter citations against extract"
+            );
+        } else {
+            ground_scenes_against_text(&mut scenes, &chapter_text);
+        }
+
+        if scenes.is_empty() {
+            anyhow::bail!(
+                "No grounded scenes remain after citation verification for chapter {}",
+                chapter.id
+            );
+        }
 
         let mut manifest = ChapterManifest::new(
             subject.id.clone(),
@@ -1004,12 +1077,21 @@ impl BackgroundTasksService {
         subject: &Subject,
         chapter: &Chapter,
     ) -> Result<String> {
+        let (text, _) = self.chapter_source_for_generation(subject, chapter).await?;
+        Ok(text)
+    }
+
+    async fn chapter_source_for_generation(
+        &self,
+        subject: &Subject,
+        chapter: &Chapter,
+    ) -> Result<(String, Vec<ExtractedPage>)> {
         if let Some(prefix) = subject.extract_prefix.as_deref()
-            && let Some(text) = self
-                .chapter_text_from_extract(prefix, chapter, subject.total_pages)
+            && let Some(pages) = self
+                .chapter_pages_from_extract(prefix, chapter, subject.total_pages)
                 .await?
         {
-            return Ok(text);
+            return Ok((prompt_from_pages(&pages), pages));
         }
 
         let file_data = self
@@ -1025,19 +1107,22 @@ impl BackgroundTasksService {
             let total_pages = doc.get_pages().len() as i32;
             let (start, end) = chapter_page_window(chapter, total_pages);
             let page_numbers: Vec<u32> = (start as u32..=end as u32).collect();
-            doc.extract_text(&page_numbers)
-                .context("Failed to extract text from PDF chapter")
+            let text = doc
+                .extract_text(&page_numbers)
+                .context("Failed to extract text from PDF chapter")?;
+            Ok((text, Vec::new()))
         } else {
-            self.extract_text(&file_data, extension).await
+            let text = self.extract_text(&file_data, extension).await?;
+            Ok((text, Vec::new()))
         }
     }
 
-    async fn chapter_text_from_extract(
+    async fn chapter_pages_from_extract(
         &self,
         prefix: &str,
         chapter: &Chapter,
         total_pages: Option<i32>,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<Vec<ExtractedPage>>> {
         let total = match total_pages {
             Some(t) if t > 0 => t,
             _ => {
@@ -1055,7 +1140,7 @@ impl BackgroundTasksService {
         };
 
         let (start, end) = chapter_page_window(chapter, total);
-        let mut parts = Vec::new();
+        let mut pages = Vec::new();
         for page in start as u32..=end as u32 {
             let key = page_object_key(prefix, page);
             let bytes = match self.storage.download_file(&key).await {
@@ -1065,27 +1150,13 @@ impl BackgroundTasksService {
                     continue;
                 }
             };
-            let extracted: ExtractedPage = serde_json::from_slice(&bytes)?;
-            let printed = match extracted.printed_page {
-                Some(n) => format!("printed p.{n}"),
-                None => extracted
-                    .printed_label
-                    .map(|l| format!("printed p.{l}"))
-                    .unwrap_or_else(|| "printed unknown".into()),
-            };
-            parts.push(format!(
-                "--- PDF p.{} / {} ---",
-                extracted.pdf_page, printed
-            ));
-            for para in extracted.paragraphs {
-                parts.push(format!("[{}] {}", para.id, para.text));
-            }
+            pages.push(serde_json::from_slice::<ExtractedPage>(&bytes)?);
         }
 
-        if parts.is_empty() {
+        if pages.is_empty() {
             return Ok(None);
         }
-        Ok(Some(parts.join("\n")))
+        Ok(Some(pages))
     }
 }
 

@@ -115,6 +115,7 @@ mod tests {
         assert!(html.contains("window.K"));
         assert!(html.contains("const h ="));
         assert!(html.contains("slidegen:citation"));
+        assert!(html.contains("cite-tip"));
         assert!(html.contains("https://example.test/packets.wav"));
         assert!(!html.contains("__MANIFEST__"));
         assert!(!html.contains("__KIT__"));

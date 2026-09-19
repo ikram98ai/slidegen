@@ -98,7 +98,7 @@ pub struct SceneSpec {
 }
 
 impl SceneSpec {
-    pub fn from_generated(generated: GeneratedScene, index: usize, chapter_text: &str) -> Self {
+    pub fn from_generated(generated: GeneratedScene, index: usize) -> Self {
         Self {
             id: scene_id_slug(&generated.id, index + 1),
             title: generated.title,
@@ -109,7 +109,7 @@ impl SceneSpec {
                 audio_key: None,
                 audio_url: None,
             },
-            citations: retain_grounded_citations(chapter_text, generated.citations),
+            citations: generated.citations,
             quiz: generated.quiz,
         }
     }
@@ -167,6 +167,24 @@ impl ChapterManifest {
             scene.depth.audio_url = None;
         }
     }
+}
+
+/// Planner output: which extract paragraphs each scene should be written from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChapterPlan {
+    #[serde(default)]
+    pub kid_lede: String,
+    pub scenes: Vec<ScenePlan>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenePlan {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub focus: String,
+    #[serde(default)]
+    pub paragraph_ids: Vec<String>,
 }
 
 /// Model completion shape before we attach audio keys and drop bad citations.

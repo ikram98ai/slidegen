@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod auth;
 pub mod bg_tasks;
+pub mod citations;
 pub mod compiler;
 pub mod extract;
 pub mod storage;

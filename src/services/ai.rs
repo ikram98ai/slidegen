@@ -1,5 +1,5 @@
 use crate::config::Settings;
-use crate::models::GeneratedChapter;
+use crate::models::{ChapterPlan, GeneratedChapter};
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose};
 use reqwest::Client;
@@ -332,6 +332,44 @@ impl AIService {
         Ok(slides.slides)
     }
 
+    /// Picks scene topics and the extract paragraphs each scene may use.
+    pub async fn plan_chapter_scenes(
+        &self,
+        chapter_title: &str,
+        catalog: &str,
+    ) -> Result<ChapterPlan> {
+        let system_instruction = r#"You plan interactive book chapters from an extract catalog.
+Reply ONLY with JSON:
+{
+  "kid_lede": "one-sentence hook",
+  "scenes": [
+    {
+      "id": "kebab-case-id",
+      "title": "string",
+      "focus": "what this scene must teach, one sentence",
+      "paragraph_ids": ["p12-2", "p12-3"]
+    }
+  ]
+}
+Rules:
+- Plan 4–6 scenes, never more than 8.
+- paragraph_ids MUST be copied from the catalog. Do not invent IDs.
+- Each scene needs 2–6 paragraph_ids that actually support its focus.
+- Prefer contiguous paragraphs on the same page when they tell one idea."#
+            .to_string();
+
+        let prompt = format!("Chapter title: {chapter_title}\n\nParagraph catalog:\n{catalog}");
+
+        let completion = self
+            .call_gemini_text(&self.text_model, Some(system_instruction), prompt)
+            .await?;
+
+        let plan: ChapterPlan = parse_json_completion(&completion)
+            .with_context(|| format!("Failed to parse chapter plan JSON from: {}", completion))?;
+
+        Ok(plan)
+    }
+
     /// Writes a grounded SceneSpec chapter. The model must cite paragraph IDs
     /// from the extract (`[p12-2] ...`); it must not invent HTML.
     pub async fn generate_chapter(
@@ -369,6 +407,7 @@ Reply ONLY with JSON matching this schema:
 Rules:
 - Every scene MUST include at least one citation.
 - citation.quote MUST be copied verbatim from the paragraph marked [paragraph_id].
+- Cite ONLY paragraph IDs that appear in the source below. Do not invent IDs or quotes.
 - pdf_page MUST match the 'PDF p.N' label. printed_page is the printed folio when given, else omit it.
 - viz.params by type:
   steps: { "title": "...", "steps": [{ "title": "...", "caption": "..." }] }

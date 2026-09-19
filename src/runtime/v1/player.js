@@ -19,10 +19,12 @@
 
   function citeButton(c) {
     const label = c.printed_page != null ? "p. " + c.printed_page : "PDF p. " + c.pdf_page;
+    const tip = h("span", { class: "cite-tip", role: "tooltip" }, c.quote || c.paragraph_id || "");
     return h("button", {
       type: "button",
       class: "cite",
       title: c.quote || c.paragraph_id,
+      "aria-label": "Source " + label,
       onclick: function () {
         post("slidegen:citation", {
           pdf_page: c.pdf_page,
@@ -31,7 +33,7 @@
           quote: c.quote,
         });
       },
-    }, label);
+    }, label, tip);
   }
 
   function playDepth(scene) {
