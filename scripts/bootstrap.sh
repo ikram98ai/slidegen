@@ -174,9 +174,14 @@ wait_ready "$WORKER_FUNCTION"
 # Note: AWS_REGION / AWS credentials are reserved Lambda env keys — the
 # runtime provides them, so they are deliberately not set here.
 
+SERVICE_KEYS_SUFFIX=""
+if [[ -n "${SERVICE_API_KEYS:-}" ]]; then
+  SERVICE_KEYS_SUFFIX=$(printf ',"SERVICE_API_KEYS":"%s"' "$SERVICE_API_KEYS")
+fi
+
 shared_env() {
-  printf '{"S3_BUCKET_NAME":"%s","SECRET_KEY":"%s","GEMINI_API_KEY":"%s","TEXT_MODEL":"%s","DEBUG":"false"%s}' \
-    "$S3_BUCKET_NAME" "$SECRET_KEY" "$GEMINI_API_KEY" "$TEXT_MODEL" "$1"
+  printf '{"S3_BUCKET_NAME":"%s","SECRET_KEY":"%s","GEMINI_API_KEY":"%s","TEXT_MODEL":"%s","DEBUG":"false"%s%s}' \
+    "$S3_BUCKET_NAME" "$SECRET_KEY" "$GEMINI_API_KEY" "$TEXT_MODEL" "$SERVICE_KEYS_SUFFIX" "$1"
 }
 
 log "Configuring API function (env vars, 30s timeout, 512MB)"

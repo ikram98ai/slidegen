@@ -100,7 +100,7 @@ bootstrap:
 teardown:
 	./scripts/teardown.sh
 
-# Create all DynamoDB tables (Users, Subjects, Chapters, Slides)
+# Create all DynamoDB tables (Users, Subjects, Chapters, Slides, Jobs)
 create-tables:
 	cargo run --bin manage -- db create-tables
 

@@ -131,6 +131,16 @@ fn table_definitions() -> Vec<TableDef> {
             range_key: Some(("id", ScalarAttributeType::S)),
             gsi: vec![],
         },
+        TableDef {
+            name: "slidegen_jobs",
+            hash_key: ("id", ScalarAttributeType::S),
+            range_key: None,
+            gsi: vec![GsiDef {
+                name: "subject-index",
+                hash_key: ("subject_id", ScalarAttributeType::S),
+                range_key: None,
+            }],
+        },
     ]
 }
 

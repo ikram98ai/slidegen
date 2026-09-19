@@ -3,6 +3,7 @@ use aws_config::{BehaviorVersion, Region};
 use aws_sdk_dynamodb::{Client, config::Builder};
 
 pub mod chapter;
+pub mod job;
 pub mod slide;
 pub mod subject;
 pub mod user;

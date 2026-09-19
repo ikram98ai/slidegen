@@ -1,6 +1,10 @@
 use crate::config::Settings;
 use crate::db::Database;
-use crate::models::{Chapter, Slide};
+use crate::models::{Chapter, JobRecord, JobStage, JobStatus, Slide, Subject};
+use crate::services::extract::{
+    self, ExtractManifest, ExtractedPage, arabic_from_label, extract_prefix, manifest_object_key,
+    page_object_key,
+};
 use crate::services::{AIService, StorageService};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -32,11 +36,15 @@ pub enum Job {
         user_id: String,
         subject_id: String,
         file_s3path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
     },
     GenerateSlides {
         user_id: String,
         subject_id: String,
         chapter_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
     },
 }
 
@@ -96,6 +104,56 @@ impl BackgroundTasksService {
         }
     }
 
+    /// Creates a tracked job row and hands the work to SQS / in-process.
+    pub async fn start_process_subject(
+        &self,
+        user_id: String,
+        tenant_id: Option<String>,
+        subject_id: String,
+        file_s3path: String,
+    ) -> Result<JobRecord> {
+        let job = JobRecord::new_process(
+            user_id.clone(),
+            tenant_id,
+            subject_id.clone(),
+            file_s3path.clone(),
+        );
+        self.db.save_job(&job).await?;
+        self.sync_subject_job(&subject_id, &job).await;
+        self.dispatch(Job::ProcessSubject {
+            user_id,
+            subject_id,
+            file_s3path,
+            job_id: Some(job.id.clone()),
+        })
+        .await?;
+        Ok(job)
+    }
+
+    pub async fn start_generate_slides(
+        &self,
+        user_id: String,
+        tenant_id: Option<String>,
+        subject_id: String,
+        chapter_id: String,
+    ) -> Result<JobRecord> {
+        let job = JobRecord::new_generate_slides(
+            user_id.clone(),
+            tenant_id,
+            subject_id.clone(),
+            chapter_id.clone(),
+        );
+        self.db.save_job(&job).await?;
+        self.dispatch(Job::GenerateSlides {
+            user_id,
+            subject_id,
+            chapter_id,
+            job_id: Some(job.id.clone()),
+        })
+        .await?;
+        Ok(job)
+    }
+
     /// Hands a job off for background execution: to SQS when a queue is
     /// configured (required on Lambda, where in-process tasks stall once the
     /// response is sent), otherwise to an in-process tokio task.
@@ -125,21 +183,24 @@ impl BackgroundTasksService {
                 user_id,
                 subject_id,
                 file_s3path,
+                job_id,
             } => {
-                self.process_subject_bg(user_id, subject_id, file_s3path)
+                self.process_subject_bg(user_id, subject_id, file_s3path, job_id)
                     .await
             }
             Job::GenerateSlides {
                 user_id,
                 subject_id,
                 chapter_id,
+                job_id,
             } => {
                 let chapter = self
                     .db
                     .get_chapter(&subject_id, &chapter_id)
                     .await?
                     .context("Chapter not found")?;
-                self.generate_slides_bg(user_id, subject_id, chapter).await
+                self.generate_slides_bg(user_id, subject_id, chapter, job_id)
+                    .await
             }
         }
     }
@@ -149,6 +210,7 @@ impl BackgroundTasksService {
         user_id: String,
         subject_id: String,
         file_s3path: String,
+        job_id: Option<String>,
     ) -> Result<()> {
         tracing::info!(
             user_id = %user_id,
@@ -158,15 +220,17 @@ impl BackgroundTasksService {
         );
 
         if let Err(e) = self
-            .do_process_subject(&user_id, &subject_id, &file_s3path)
+            .do_process_subject(&user_id, &subject_id, &file_s3path, job_id.as_deref())
             .await
         {
             tracing::error!(
                 error = format!("{e:#}"),
                 "Failed to process subject background task"
             );
+            self.fail_job(job_id.as_deref(), &e).await;
             if let Ok(Some(mut subject)) = self.db.get_subject(&subject_id).await {
                 subject.processing_status = "failed".to_string();
+                subject.processing_stage = Some(JobStage::Failed.as_str().to_string());
                 let _ = self.db.save_subject(&subject).await;
             }
             return Err(e);
@@ -179,13 +243,8 @@ impl BackgroundTasksService {
             "pdf" => {
                 let doc =
                     lopdf::Document::load_mem(file_data).context("Failed to load PDF document")?;
-                let pages = doc.get_pages();
-                // Heuristic: Extract first 20 pages if PDF is large
-                let pages_to_extract = std::cmp::min(20, pages.len());
-                let mut page_numbers = Vec::new();
-                for i in 1..=pages_to_extract {
-                    page_numbers.push(i as u32);
-                }
+                let total = doc.get_pages().len() as u32;
+                let page_numbers: Vec<u32> = (1..=total).collect();
                 doc.extract_text(&page_numbers)
                     .context("Failed to extract PDF text")
             }
@@ -209,51 +268,117 @@ impl BackgroundTasksService {
         }
     }
 
-    /// Extracts text from the first pages of a PDF one page at a time,
-    /// persisting processed/total page counts on the subject so the UI can
-    /// show real progress. Pages that fail to extract are skipped.
-    async fn extract_pdf_text_with_progress(
+    /// Extracts every PDF page, writes paragraph-level JSON to S3, and returns
+    /// the in-memory pages plus manifest used to build the TOC prompt.
+    async fn extract_pdf_book(
         &self,
         file_data: &[u8],
+        user_id: &str,
         subject_id: &str,
-    ) -> Result<String> {
+        job_id: Option<&str>,
+    ) -> Result<(Vec<ExtractedPage>, ExtractManifest)> {
         let doc = lopdf::Document::load_mem(file_data).context("Failed to load PDF document")?;
-        // Heuristic: Extract first 20 pages if PDF is large
-        let total = std::cmp::min(20, doc.get_pages().len()) as i32;
-        self.update_page_progress(subject_id, 0, total).await;
+        let total = doc.get_pages().len() as u32;
+        if total == 0 {
+            anyhow::bail!("PDF has no pages");
+        }
 
-        let mut text = String::new();
+        self.update_page_progress(
+            subject_id,
+            job_id,
+            0,
+            total as i32,
+            JobStage::ExtractingPages,
+        )
+        .await;
+
+        let mut pages = Vec::with_capacity(total as usize);
         for page in 1..=total {
-            match doc.extract_text(&[page as u32]) {
-                Ok(page_text) => {
-                    text.push_str(&page_text);
-                    text.push('\n');
-                }
+            match doc.extract_text(&[page]) {
+                Ok(page_text) => pages.push(extract::page_from_text(page, &page_text)),
                 Err(e) => {
                     tracing::warn!(
                         error = format!("{e:#}"),
                         page,
                         "Skipping unextractable page"
                     );
+                    pages.push(ExtractedPage {
+                        pdf_page: page,
+                        printed_page: None,
+                        printed_label: None,
+                        paragraphs: vec![],
+                    });
                 }
             }
-            self.update_page_progress(subject_id, page, total).await;
+            self.update_page_progress(
+                subject_id,
+                job_id,
+                page as i32,
+                total as i32,
+                JobStage::ExtractingPages,
+            )
+            .await;
         }
 
-        if text.trim().is_empty() {
-            anyhow::bail!("Failed to extract text from any of the first {total} PDF pages");
+        if pages.iter().all(|p| p.paragraphs.is_empty()) {
+            anyhow::bail!("Failed to extract text from any of the {total} PDF pages");
         }
-        Ok(text)
+
+        let offset_samples: Vec<(u32, Option<i32>)> = pages
+            .iter()
+            .map(|p| (p.pdf_page, arabic_from_label(p.printed_label.as_deref())))
+            .collect();
+        let page_offset = extract::infer_page_offset(&offset_samples);
+        extract::apply_page_offset(&mut pages, page_offset);
+        let toc_pdf_pages = extract::detect_toc_pages(&pages);
+        let prefix = extract_prefix(user_id, subject_id);
+        let manifest = ExtractManifest {
+            total_pages: total,
+            page_offset,
+            toc_pdf_pages,
+            pages_prefix: prefix.clone(),
+        };
+
+        for page in &pages {
+            let key = page_object_key(&prefix, page.pdf_page);
+            self.storage
+                .upload_json(&key, page)
+                .await
+                .with_context(|| format!("Failed to upload extract page {}", page.pdf_page))?;
+        }
+        self.storage
+            .upload_json(&manifest_object_key(&prefix), &manifest)
+            .await
+            .context("Failed to upload extract manifest")?;
+
+        Ok((pages, manifest))
     }
 
-    /// Best-effort progress write: failures are ignored so a flaky status
-    /// update can never abort processing itself.
-    async fn update_page_progress(&self, subject_id: &str, processed: i32, total: i32) {
+    async fn update_page_progress(
+        &self,
+        subject_id: &str,
+        job_id: Option<&str>,
+        processed: i32,
+        total: i32,
+        stage: JobStage,
+    ) {
         if let Ok(Some(mut subject)) = self.db.get_subject(subject_id).await {
             subject.processed_pages = Some(processed);
             subject.total_pages = Some(total);
+            subject.processing_status = "processing".to_string();
+            subject.processing_stage = Some(stage.as_str().to_string());
             subject.updated_at = Utc::now();
             let _ = self.db.save_subject(&subject).await;
+        }
+        if let Some(id) = job_id
+            && let Ok(Some(mut job)) = self.db.get_job(id).await
+        {
+            job.status = JobStatus::Running.as_str().to_string();
+            job.stage = stage.as_str().to_string();
+            job.processed_pages = Some(processed);
+            job.total_pages = Some(total);
+            job.updated_at = Utc::now();
+            let _ = self.db.save_job(&job).await;
         }
     }
 
@@ -262,6 +387,7 @@ impl BackgroundTasksService {
         &self,
         subject_id: &str,
         chapter_id: &str,
+        job_id: Option<&str>,
         processed: i32,
         total: i32,
     ) {
@@ -271,6 +397,60 @@ impl BackgroundTasksService {
             chapter.updated_at = Utc::now();
             let _ = self.db.save_chapter(&chapter).await;
         }
+        if let Some(id) = job_id
+            && let Ok(Some(mut job)) = self.db.get_job(id).await
+        {
+            job.status = JobStatus::Running.as_str().to_string();
+            job.stage = JobStage::GeneratingSlides.as_str().to_string();
+            job.processed_slides = Some(processed);
+            job.total_slides = Some(total);
+            job.updated_at = Utc::now();
+            let _ = self.db.save_job(&job).await;
+        }
+    }
+
+    async fn fail_job(&self, job_id: Option<&str>, error: &anyhow::Error) {
+        let Some(id) = job_id else { return };
+        if let Ok(Some(mut job)) = self.db.get_job(id).await {
+            job.status = JobStatus::Failed.as_str().to_string();
+            job.stage = JobStage::Failed.as_str().to_string();
+            job.error = Some(format!("{error:#}"));
+            job.updated_at = Utc::now();
+            let _ = self.db.save_job(&job).await;
+        }
+    }
+
+    async fn complete_job(&self, job_id: Option<&str>, chapters_total: Option<i32>) {
+        let Some(id) = job_id else { return };
+        if let Ok(Some(mut job)) = self.db.get_job(id).await {
+            job.status = JobStatus::Completed.as_str().to_string();
+            job.stage = JobStage::Completed.as_str().to_string();
+            job.chapters_total = chapters_total.or(job.chapters_total);
+            job.chapters_done = chapters_total.or(job.chapters_done);
+            job.error = None;
+            job.updated_at = Utc::now();
+            let _ = self.db.save_job(&job).await;
+        }
+    }
+
+    async fn sync_subject_job(&self, subject_id: &str, job: &JobRecord) {
+        if let Ok(Some(mut subject)) = self.db.get_subject(subject_id).await {
+            subject.job_id = Some(job.id.clone());
+            subject.processing_stage = Some(job.stage.clone());
+            subject.updated_at = Utc::now();
+            let _ = self.db.save_subject(&subject).await;
+        }
+    }
+
+    async fn mark_job_stage(&self, job_id: Option<&str>, stage: JobStage) {
+        if let Some(id) = job_id
+            && let Ok(Some(mut job)) = self.db.get_job(id).await
+        {
+            job.status = JobStatus::Running.as_str().to_string();
+            job.stage = stage.as_str().to_string();
+            job.updated_at = Utc::now();
+            let _ = self.db.save_job(&job).await;
+        }
     }
 
     async fn do_process_subject(
@@ -278,34 +458,55 @@ impl BackgroundTasksService {
         user_id: &str,
         subject_id: &str,
         file_s3path: &str,
+        job_id: Option<&str>,
     ) -> Result<()> {
-        // 1. Download file from S3
         let file_data = self
             .storage
             .download_file(file_s3path)
             .await
             .context("Failed to download file from S3")?;
 
-        // 2. Extract text based on extension, reporting page progress for PDFs
         let extension = file_s3path.split('.').next_back().unwrap_or("");
         let toc_text = if extension.eq_ignore_ascii_case("pdf") {
-            self.extract_pdf_text_with_progress(&file_data, subject_id)
-                .await?
-        } else {
-            self.extract_text(&file_data, extension).await?
-        };
+            let (pages, manifest) = self
+                .extract_pdf_book(&file_data, user_id, subject_id, job_id)
+                .await?;
 
-        // 3. Call AI to analyze TOC
-        // AI can handle a reasonably large amount of text, but we may want to truncate if too large
-        let truncated_toc = truncate_to_char_boundary(&toc_text, 10000);
+            if let Ok(Some(mut subject)) = self.db.get_subject(subject_id).await {
+                subject.extract_prefix = Some(manifest.pages_prefix.clone());
+                subject.page_offset = manifest.page_offset;
+                subject.total_pages = Some(manifest.total_pages as i32);
+                subject.processed_pages = Some(manifest.total_pages as i32);
+                subject.processing_stage = Some(JobStage::AnalyzingToc.as_str().to_string());
+                subject.updated_at = Utc::now();
+                let _ = self.db.save_subject(&subject).await;
+            }
+            if let Some(id) = job_id
+                && let Ok(Some(mut job)) = self.db.get_job(id).await
+            {
+                job.extract_prefix = Some(manifest.pages_prefix.clone());
+                job.page_offset = manifest.page_offset;
+                job.total_pages = Some(manifest.total_pages as i32);
+                job.processed_pages = Some(manifest.total_pages as i32);
+                job.stage = JobStage::AnalyzingToc.as_str().to_string();
+                job.status = JobStatus::Running.as_str().to_string();
+                job.updated_at = Utc::now();
+                let _ = self.db.save_job(&job).await;
+            }
+
+            extract::build_toc_prompt(&pages, &manifest)
+        } else {
+            self.mark_job_stage(job_id, JobStage::AnalyzingToc).await;
+            truncate_to_char_boundary(&self.extract_text(&file_data, extension).await?, 48_000)
+                .to_string()
+        };
 
         let chapters_data = self
             .ai
-            .analyze_book_toc(truncated_toc)
+            .analyze_book_toc(&toc_text)
             .await
             .context("AI failed to analyze TOC")?;
 
-        // 4. Create chapters in DynamoDB
         let mut chapters = Vec::new();
         for (idx, c_data) in chapters_data.into_iter().enumerate() {
             chapters.push(Chapter {
@@ -319,18 +520,21 @@ impl BackgroundTasksService {
                 processing_status: Some("completed".to_string()),
                 processed_slides: None,
                 total_slides: None,
+                job_id: None,
+                package_key: None,
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
             });
         }
+        let chapters_total = chapters.len() as i32;
         self.db
             .save_chapters(chapters)
             .await
             .context("Failed to save chapters to DB")?;
 
-        // 5. Update subject processing status to "completed"
         if let Some(mut subject) = self.db.get_subject(subject_id).await? {
             subject.processing_status = "completed".to_string();
+            subject.processing_stage = Some(JobStage::Completed.as_str().to_string());
             subject.updated_at = Utc::now();
             self.db
                 .save_subject(&subject)
@@ -338,6 +542,7 @@ impl BackgroundTasksService {
                 .context("Failed to update subject status")?;
         }
 
+        self.complete_job(job_id, Some(chapters_total)).await;
         Ok(())
     }
 
@@ -346,6 +551,7 @@ impl BackgroundTasksService {
         user_id: String,
         subject_id: String,
         chapter: Chapter,
+        job_id: Option<String>,
     ) -> Result<()> {
         tracing::info!(
             user_id = %user_id,
@@ -355,13 +561,14 @@ impl BackgroundTasksService {
         );
 
         if let Err(e) = self
-            .do_generate_slides(&user_id, &subject_id, &chapter)
+            .do_generate_slides(&user_id, &subject_id, &chapter, job_id.as_deref())
             .await
         {
             tracing::error!(
                 error = format!("{e:#}"),
                 "Failed to generate slides background task"
             );
+            self.fail_job(job_id.as_deref(), &e).await;
             if let Ok(Some(mut c)) = self.db.get_chapter(&subject_id, &chapter.id).await {
                 c.processing_status = Some("failed".to_string());
                 let _ = self.db.save_chapter(&c).await;
@@ -376,53 +583,20 @@ impl BackgroundTasksService {
         user_id: &str,
         subject_id: &str,
         chapter: &Chapter,
+        job_id: Option<&str>,
     ) -> Result<()> {
-        // 1. Get subject to find file path
         let subject = self
             .db
             .get_subject(subject_id)
             .await?
             .context("Subject not found")?;
 
-        // 2. Download PDF/DOCX
-        let file_data = self
-            .storage
-            .download_file(&subject.file_path)
-            .await
-            .context("Failed to download file")?;
+        if let Ok(Some(mut c)) = self.db.get_chapter(subject_id, &chapter.id).await {
+            c.job_id = job_id.map(|s| s.to_string());
+            let _ = self.db.save_chapter(&c).await;
+        }
 
-        let extension = subject.file_path.split('.').next_back().unwrap_or("");
-
-        // 3. Extract text
-        let chapter_text = if extension.to_lowercase() == "pdf" {
-            let doc =
-                lopdf::Document::load_mem(&file_data).context("Failed to load PDF document")?;
-            let total_pages = doc.get_pages().len() as i32;
-            let start = chapter.page_start.clamp(1, total_pages);
-            let end = if chapter.page_end < start {
-                // TOC analysis returned no usable range (e.g. 0/0): fall back
-                // to a 20-page window so generation still has content.
-                tracing::warn!(
-                    page_start = chapter.page_start,
-                    page_end = chapter.page_end,
-                    "Chapter has an invalid page range; falling back to a 20-page window"
-                );
-                (start + 19).min(total_pages)
-            } else {
-                chapter.page_end.min(total_pages)
-            };
-
-            let mut page_numbers = Vec::new();
-            for i in start..=end {
-                page_numbers.push(i as u32);
-            }
-            doc.extract_text(&page_numbers)
-                .context("Failed to extract text from PDF chapter")?
-        } else {
-            // For DOCX/DOC, we just extract all and let AI pick (better to split by paragraphs if large)
-            // But usually chapters are within reasonable limits for LLM context if it's a doc
-            self.extract_text(&file_data, extension).await?
-        };
+        let chapter_text = self.chapter_text_for_generation(&subject, chapter).await?;
 
         if chapter_text.trim().is_empty() {
             anyhow::bail!("No text extracted for chapter in {}", subject.file_path);
@@ -436,7 +610,7 @@ impl BackgroundTasksService {
             .context("AI failed to generate slides")?;
 
         let total_slides = slides_data.len() as i32;
-        self.update_slide_progress(subject_id, &chapter.id, 0, total_slides)
+        self.update_slide_progress(subject_id, &chapter.id, job_id, 0, total_slides)
             .await;
 
         // 5. Replace any slides from a previous generation run, so regenerating
@@ -495,8 +669,14 @@ impl BackgroundTasksService {
                 .await
                 .context("Failed to save slide")?;
 
-            self.update_slide_progress(subject_id, &chapter.id, idx as i32 + 1, total_slides)
-                .await;
+            self.update_slide_progress(
+                subject_id,
+                &chapter.id,
+                job_id,
+                idx as i32 + 1,
+                total_slides,
+            )
+            .await;
         }
 
         if let Some(mut c) = self.db.get_chapter(subject_id, &chapter.id).await? {
@@ -508,8 +688,115 @@ impl BackgroundTasksService {
                 .context("Failed to update chapter status")?;
         }
 
+        self.complete_job(job_id, None).await;
         Ok(())
     }
+
+    /// Prefers the persisted page extract (paragraphs + citations later);
+    /// falls back to re-reading the original file.
+    async fn chapter_text_for_generation(
+        &self,
+        subject: &Subject,
+        chapter: &Chapter,
+    ) -> Result<String> {
+        if let Some(prefix) = subject.extract_prefix.as_deref()
+            && let Some(text) = self
+                .chapter_text_from_extract(prefix, chapter, subject.total_pages)
+                .await?
+        {
+            return Ok(text);
+        }
+
+        let file_data = self
+            .storage
+            .download_file(&subject.file_path)
+            .await
+            .context("Failed to download file")?;
+        let extension = subject.file_path.split('.').next_back().unwrap_or("");
+
+        if extension.eq_ignore_ascii_case("pdf") {
+            let doc =
+                lopdf::Document::load_mem(&file_data).context("Failed to load PDF document")?;
+            let total_pages = doc.get_pages().len() as i32;
+            let (start, end) = chapter_page_window(chapter, total_pages);
+            let page_numbers: Vec<u32> = (start as u32..=end as u32).collect();
+            doc.extract_text(&page_numbers)
+                .context("Failed to extract text from PDF chapter")
+        } else {
+            self.extract_text(&file_data, extension).await
+        }
+    }
+
+    async fn chapter_text_from_extract(
+        &self,
+        prefix: &str,
+        chapter: &Chapter,
+        total_pages: Option<i32>,
+    ) -> Result<Option<String>> {
+        let total = match total_pages {
+            Some(t) if t > 0 => t,
+            _ => {
+                let bytes = match self
+                    .storage
+                    .download_file(&manifest_object_key(prefix))
+                    .await
+                {
+                    Ok(b) => b,
+                    Err(_) => return Ok(None),
+                };
+                let manifest: ExtractManifest = serde_json::from_slice(&bytes)?;
+                manifest.total_pages as i32
+            }
+        };
+
+        let (start, end) = chapter_page_window(chapter, total);
+        let mut parts = Vec::new();
+        for page in start as u32..=end as u32 {
+            let key = page_object_key(prefix, page);
+            let bytes = match self.storage.download_file(&key).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = format!("{e:#}"), key, "Missing extract page");
+                    continue;
+                }
+            };
+            let extracted: ExtractedPage = serde_json::from_slice(&bytes)?;
+            let printed = match extracted.printed_page {
+                Some(n) => format!("printed p.{n}"),
+                None => extracted
+                    .printed_label
+                    .map(|l| format!("printed p.{l}"))
+                    .unwrap_or_else(|| "printed unknown".into()),
+            };
+            parts.push(format!(
+                "--- PDF p.{} / {} ---",
+                extracted.pdf_page, printed
+            ));
+            for para in extracted.paragraphs {
+                parts.push(format!("[{}] {}", para.id, para.text));
+            }
+        }
+
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(parts.join("\n")))
+    }
+}
+
+fn chapter_page_window(chapter: &Chapter, total_pages: i32) -> (i32, i32) {
+    let start = chapter.page_start.clamp(1, total_pages.max(1));
+    let end = if chapter.page_end < start {
+        tracing::warn!(
+            page_start = chapter.page_start,
+            page_end = chapter.page_end,
+            "Chapter has an invalid page range; falling back to a 30-page window"
+        );
+        (start + 29).min(total_pages.max(start))
+    } else {
+        chapter.page_end.min(total_pages.max(start))
+    };
+    (start, end)
 }
 
 // Unit tests for private helpers live here; the `Job` wire-format contract is
@@ -551,5 +838,28 @@ mod tests {
             assert!(t.len() <= max);
             assert!(s.starts_with(t));
         }
+    }
+
+    #[test]
+    fn chapter_page_window_falls_back_when_range_is_invalid() {
+        let chapter = Chapter {
+            id: "c".into(),
+            subject_id: "s".into(),
+            user_id: "u".into(),
+            title: "T".into(),
+            page_start: 0,
+            page_end: 0,
+            order_index: 0,
+            processing_status: None,
+            processed_slides: None,
+            total_slides: None,
+            job_id: None,
+            package_key: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let (start, end) = chapter_page_window(&chapter, 100);
+        assert_eq!(start, 1);
+        assert_eq!(end, 30);
     }
 }

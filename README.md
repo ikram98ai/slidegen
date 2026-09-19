@@ -152,10 +152,12 @@ The pipeline only updates code. One-time provisioning (Lambda creation, DynamoDB
 
 ## Background Jobs (SQS + Worker Lambda)
 
-Long-running AI work (TOC analysis, slide + audio generation) cannot run in-process on Lambda — the execution environment freezes as soon as the HTTP response is sent. Instead:
+Long-running AI work (full-book extract, TOC analysis, slide + audio generation) cannot run in-process on Lambda — the execution environment freezes as soon as the HTTP response is sent. Instead:
 
 - **Locally** (no `JOBS_QUEUE_URL` set): jobs run in-process via `tokio::spawn` — zero setup for development.
-- **In production**: the API Lambda enqueues a JSON `Job` message to SQS; a second Lambda (`worker` binary) consumes the queue, executes the job, and reports per-message failures so SQS retries only what failed. After 3 failed attempts a job lands in the dead-letter queue.
+- **In production**: the API Lambda writes a row to `slidegen_jobs` and enqueues a JSON `Job` message to SQS; a second Lambda (`worker` binary) consumes the queue, updates that row as it extracts every PDF page (paragraph IDs + printed-page offset), and reports per-message failures so SQS retries only what failed. After 3 failed attempts a job lands in the dead-letter queue.
+
+Poll progress with `GET /api/jobs/{job_id}` (user JWT or `X-Api-Key`). Sibling backends ingest a book with `POST /api/v1/books` (multipart) or `POST /api/v1/books/ingest` (`file_s3path` already in the bucket). Configure keys as `SERVICE_API_KEYS=khaneducation:sk_…,knoio:sk_…`.
 
 All of this is wired automatically by `make bootstrap` (see below). To do it manually instead:
 

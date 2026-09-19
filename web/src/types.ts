@@ -54,6 +54,10 @@ export interface SubjectResponse {
   processing_status: string;
   processed_pages?: number | null;
   total_pages?: number | null;
+  job_id?: string | null;
+  processing_stage?: string | null;
+  extract_prefix?: string | null;
+  page_offset?: number | null;
   created_at: string;
   updated_at?: string | null;
 }
@@ -66,6 +70,10 @@ export interface SubjectDetailResponse {
   user_id: string;
   file_path: string;
   processing_status: string;
+  job_id?: string | null;
+  processing_stage?: string | null;
+  extract_prefix?: string | null;
+  page_offset?: number | null;
   chapters?: ChapterResponse[];
   created_at: string;
   updated_at?: string | null;
@@ -86,8 +94,31 @@ export interface ChapterResponse {
   processing_status?: string | null;
   processed_slides?: number | null;
   total_slides?: number | null;
+  job_id?: string | null;
+  package_key?: string | null;
   created_at: string;
   updated_at?: string | null;
+}
+
+export interface JobResponse {
+  id: string;
+  kind: string;
+  status: string;
+  stage: string;
+  subject_id: string;
+  chapter_id?: string | null;
+  tenant_id?: string | null;
+  processed_pages?: number | null;
+  total_pages?: number | null;
+  processed_slides?: number | null;
+  total_slides?: number | null;
+  chapters_done?: number | null;
+  chapters_total?: number | null;
+  extract_prefix?: string | null;
+  page_offset?: number | null;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ChapterCreate {

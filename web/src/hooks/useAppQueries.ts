@@ -5,6 +5,7 @@ import {
   slidesApi,
   usersApi,
   chaptersApi,
+  jobsApi,
 } from "../services/api";
 import type {
   SlideUpdate,
@@ -12,6 +13,7 @@ import type {
   SubjectCreate,
   SlideResponse,
   SubjectDetailResponse,
+  JobResponse,
 } from "../types";
 import { DocType } from "../types";
 import { useAuthStore } from "../store/authStore";
@@ -177,6 +179,24 @@ export const useDeleteSubject = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["subjects"] });
+    },
+  });
+};
+
+export const useJob = (jobId: string | undefined | null) => {
+  return useQuery<JobResponse | null>({
+    queryKey: ["jobs", jobId],
+    queryFn: async () => {
+      if (!jobId) return null;
+      return await jobsApi.getJob(jobId);
+    },
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === "queued" || status === "running") {
+        return 3000;
+      }
+      return false;
     },
   });
 };

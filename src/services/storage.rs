@@ -22,6 +22,10 @@ fn content_type_for_key(key: &str) -> &'static str {
         "mp3" => "audio/mpeg",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
+        "json" => "application/json",
+        "html" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" => "text/javascript; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -41,6 +45,11 @@ impl StorageService {
             bucket_name: settings.s3_bucket_name.clone(),
             region: settings.aws_region.clone(),
         }
+    }
+
+    pub async fn upload_json<T: serde::Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        let bytes = serde_json::to_vec(value)?;
+        self.upload_file(key, bytes).await
     }
 
     pub async fn upload_file(&self, key: &str, content: Vec<u8>) -> Result<()> {
@@ -115,6 +124,14 @@ mod tests {
         assert_eq!(content_type_for_key("audio/u1/c1/s1.mp3"), "audio/mpeg");
         assert_eq!(content_type_for_key("avatars/u1.JPG"), "image/jpeg");
         assert_eq!(content_type_for_key("avatars/u1.png"), "image/png");
+        assert_eq!(
+            content_type_for_key("extract/pages/0001.json"),
+            "application/json"
+        );
+        assert_eq!(
+            content_type_for_key("chapters/c1/index.html"),
+            "text/html; charset=utf-8"
+        );
     }
 
     #[test]

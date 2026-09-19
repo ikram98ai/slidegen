@@ -24,6 +24,18 @@ pub struct Subject {
     /// Total pages the current processing run will extract.
     #[serde(default)]
     pub total_pages: Option<i32>,
+    /// Latest background job for this book (TOC extract, later chapter builds).
+    #[serde(default)]
+    pub job_id: Option<String>,
+    /// Fine-grained stage mirrored from the job (`extracting_pages`, `analyzing_toc`, …).
+    #[serde(default)]
+    pub processing_stage: Option<String>,
+    /// S3 prefix of the page-accurate extract (`…/extract`).
+    #[serde(default)]
+    pub extract_prefix: Option<String>,
+    /// `printed_page = pdf_page - page_offset` when known.
+    #[serde(default)]
+    pub page_offset: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -54,6 +66,14 @@ pub struct SubjectResponse {
     pub processed_pages: Option<i32>,
     #[serde(default)]
     pub total_pages: Option<i32>,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    #[serde(default)]
+    pub processing_stage: Option<String>,
+    #[serde(default)]
+    pub extract_prefix: Option<String>,
+    #[serde(default)]
+    pub page_offset: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -80,6 +100,10 @@ impl From<Subject> for SubjectResponse {
             processing_status: subject.processing_status,
             processed_pages: subject.processed_pages,
             total_pages: subject.total_pages,
+            job_id: subject.job_id,
+            processing_stage: subject.processing_stage,
+            extract_prefix: subject.extract_prefix,
+            page_offset: subject.page_offset,
             created_at: subject.created_at,
             updated_at: Some(subject.updated_at),
         }

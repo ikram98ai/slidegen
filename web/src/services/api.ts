@@ -11,6 +11,7 @@ import type {
   SlideUpdate,
   SubjectDetailResponse,
   ChapterCreate,
+  JobResponse,
 } from "../types";
 
 export const authApi = {
@@ -154,6 +155,13 @@ export const chaptersApi = {
     const response = await api.get<SlideResponse[]>(
       `/chapters/${chapterId}/slides`
     );
+    return response.data;
+  },
+};
+
+export const jobsApi = {
+  getJob: async (jobId: string): Promise<JobResponse> => {
+    const response = await api.get<JobResponse>(`/jobs/${jobId}`);
     return response.data;
   },
 };

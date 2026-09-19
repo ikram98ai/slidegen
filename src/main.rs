@@ -14,7 +14,7 @@ use slidegen::services::{AIService, BackgroundTasksService, StorageService};
 
 use utoipa::{
     Modify, OpenApi,
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme},
 };
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -31,7 +31,11 @@ impl Modify for SecurityAddon {
                         .bearer_format("JWT")
                         .build(),
                 ),
-            )
+            );
+            components.add_security_scheme(
+                "apiKeyAuth",
+                SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("X-Api-Key"))),
+            );
         }
     }
 }
@@ -64,6 +68,9 @@ impl Modify for SecurityAddon {
         api::chapters::get_chapter_slides,
         api::chapters::update_slide,
         api::chapters::delete_slide,
+        api::jobs::get_job,
+        api::v1::upload_book,
+        api::v1::ingest_book,
     ),
     components(
         schemas(
@@ -85,6 +92,9 @@ impl Modify for SecurityAddon {
             slidegen::models::SlideResponse,
             api::chapters::GenerativeResponse,
             slidegen::models::UserUpdate,
+            slidegen::models::JobResponse,
+            slidegen::models::IngestBookRequest,
+            slidegen::models::IngestBookResponse,
         ),
     ),
     tags(
@@ -171,6 +181,8 @@ async fn main() -> anyhow::Result<()> {
         .nest("/api/users", api::users::router())
         .nest("/api/subjects", api::subjects::router())
         .nest("/api/chapters", api::chapters::router())
+        .nest("/api/jobs", api::jobs::router())
+        .nest("/api/v1", api::v1::router())
         .layer(CorsLayer::permissive())
         .with_state(shared_state);
 

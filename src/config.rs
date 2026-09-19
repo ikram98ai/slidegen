@@ -1,6 +1,9 @@
 use dotenvy::dotenv;
 use std::env;
 
+/// Tenant id + shared secret accepted via the `X-Api-Key` header.
+pub type ServiceApiKey = (String, String);
+
 #[derive(Debug, Clone)]
 pub struct Settings {
     // AWS
@@ -18,6 +21,8 @@ pub struct Settings {
     pub algorithm: String,
     pub access_token_expire_days: i64,
     pub refresh_token_expire_days: i64,
+    /// `tenant_id:secret,other:secret` — used by sibling services (khaneducation, …).
+    pub service_api_keys: Vec<ServiceApiKey>,
 
     // AI Services
     pub gemini_api_key: Option<String>,
@@ -57,11 +62,97 @@ impl Settings {
                 .unwrap_or_else(|_| "30".to_string())
                 .parse()
                 .unwrap_or(30),
+            service_api_keys: parse_service_api_keys(
+                &env::var("SERVICE_API_KEYS").unwrap_or_default(),
+            ),
 
             gemini_api_key: env::var("GEMINI_API_KEY").ok(),
             text_model: env::var("TEXT_MODEL").unwrap_or_else(|_| "gemini-2.5-flash".to_string()),
             embedding_model: env::var("EMBEDDING_MODEL")
-                .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
+                .unwrap_or_else(|_| "gemini-embedding-001".to_string()),
         }
+    }
+
+    pub fn tenant_for_api_key(&self, key: &str) -> Option<&str> {
+        self.service_api_keys
+            .iter()
+            .find_map(|(tenant, secret)| constant_eq(secret, key).then_some(tenant.as_str()))
+    }
+}
+
+/// `khaneducation:sk_xxx,knoio:sk_yyy`
+pub fn parse_service_api_keys(raw: &str) -> Vec<ServiceApiKey> {
+    raw.split(',')
+        .filter_map(|pair| {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                return None;
+            }
+            let (id, key) = pair.split_once(':')?;
+            let id = id.trim();
+            let key = key.trim();
+            if id.is_empty() || key.is_empty() {
+                None
+            } else {
+                Some((id.to_string(), key.to_string()))
+            }
+        })
+        .collect()
+}
+
+fn constant_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_service_api_keys_skips_junk() {
+        let keys = parse_service_api_keys(" khaneducation:sk_live_1 , ,knoio:sk_2,bad");
+        assert_eq!(
+            keys,
+            vec![
+                ("khaneducation".into(), "sk_live_1".into()),
+                ("knoio".into(), "sk_2".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn tenant_lookup_is_length_safe() {
+        let settings = Settings {
+            aws_access_key_id: None,
+            aws_secret_access_key: None,
+            aws_region: "us-east-1".into(),
+            s3_bucket_name: "b".into(),
+            jobs_queue_url: None,
+            debug: true,
+            secret_key: "s".into(),
+            algorithm: "HS256".into(),
+            access_token_expire_days: 1,
+            refresh_token_expire_days: 1,
+            service_api_keys: vec![("khan".into(), "sk_abc".into())],
+            gemini_api_key: None,
+            text_model: "m".into(),
+            embedding_model: "e".into(),
+        };
+        assert_eq!(settings.tenant_for_api_key("sk_abc"), Some("khan"));
+        assert_eq!(settings.tenant_for_api_key("sk_ab"), None);
+        assert_eq!(settings.tenant_for_api_key("sk_xyz"), None);
+    }
+
+    #[test]
+    fn constant_eq_rejects_prefix() {
+        assert!(constant_eq("abcd", "abcd"));
+        assert!(!constant_eq("abcd", "abc"));
+        assert!(!constant_eq("abcd", "abce"));
     }
 }

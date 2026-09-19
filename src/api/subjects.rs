@@ -14,7 +14,6 @@ use crate::models::{
     ChapterResponse, Subject, SubjectCreate, SubjectDetailResponse, SubjectResponse, SubjectType,
     SubjectUpdate,
 };
-use crate::services::bg_tasks::Job;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -221,6 +220,10 @@ pub async fn upload_subject(
         processing_status: "processing".to_string(),
         processed_pages: None,
         total_pages: None,
+        job_id: None,
+        processing_stage: Some("queued".to_string()),
+        extract_prefix: None,
+        page_offset: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -231,17 +234,19 @@ pub async fn upload_subject(
         .await
         .map_err(|e: anyhow::Error| AppError::InternalServerError(e))?;
 
-    // 3. Trigger background processing (SQS on Lambda, in-process locally)
-    state
+    let job = state
         .bg_tasks
-        .dispatch(Job::ProcessSubject {
-            user_id: current_user.id.clone(),
-            subject_id: subject_id.clone(),
-            file_s3path: file_path.clone(),
-        })
+        .start_process_subject(
+            current_user.id.clone(),
+            None,
+            subject_id.clone(),
+            file_path.clone(),
+        )
         .await
         .map_err(AppError::InternalServerError)?;
 
+    let mut subject = subject;
+    subject.job_id = Some(job.id);
     Ok(Json(SubjectResponse::from(subject)))
 }
 
@@ -309,6 +314,7 @@ pub async fn reprocess_subject(
     subject.processing_status = "processing".to_string();
     subject.processed_pages = None;
     subject.total_pages = None;
+    subject.processing_stage = Some("queued".to_string());
     subject.updated_at = Utc::now();
     state
         .db
@@ -316,16 +322,18 @@ pub async fn reprocess_subject(
         .await
         .map_err(|e: anyhow::Error| AppError::InternalServerError(e))?;
 
-    state
+    let job = state
         .bg_tasks
-        .dispatch(Job::ProcessSubject {
-            user_id: current_user.id.clone(),
-            subject_id: subject.id.clone(),
-            file_s3path: subject.file_path.clone(),
-        })
+        .start_process_subject(
+            current_user.id.clone(),
+            None,
+            subject.id.clone(),
+            subject.file_path.clone(),
+        )
         .await
         .map_err(AppError::InternalServerError)?;
 
+    subject.job_id = Some(job.id);
     Ok(Json(SubjectResponse::from(subject)))
 }
 

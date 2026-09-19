@@ -20,6 +20,7 @@ fn test_settings() -> Settings {
         algorithm: "HS256".to_string(),
         access_token_expire_days: 7,
         refresh_token_expire_days: 30,
+        service_api_keys: vec![],
         gemini_api_key: None,
         text_model: "test-model".to_string(),
         embedding_model: "test-embedding".to_string(),

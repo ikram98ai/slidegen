@@ -137,8 +137,9 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
                   size={38}
                 />
                 <span className="ml-2">
-                  {(subject.processed_pages ?? 0) >= subject.total_pages
-                    ? "Analyzing..."
+                  {subject.processing_stage === "analyzing_toc" ||
+                  (subject.processed_pages ?? 0) >= subject.total_pages
+                    ? "Analyzing contents..."
                     : "Reading pages..."}
                 </span>
               </div>

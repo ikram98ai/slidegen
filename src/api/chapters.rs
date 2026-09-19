@@ -15,7 +15,6 @@ use crate::error::AppError;
 use crate::models::{
     Chapter, ChapterCreate, ChapterResponse, ChapterUpdate, SlideResponse, SlideUpdate,
 };
-use crate::services::bg_tasks::Job;
 
 pub fn router() -> Router<Arc<AppState>> {
     use axum::routing::delete;
@@ -75,6 +74,8 @@ pub async fn create_chapter(
         processing_status: Some("completed".to_string()),
         processed_slides: None,
         total_slides: None,
+        job_id: None,
+        package_key: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
@@ -243,24 +244,21 @@ pub async fn generate_slides(
         ));
     }
 
-    // Mark the chapter as processing before handing the job off.
-    let mut chapter_to_process = chapter.clone();
+    let mut chapter_to_process = chapter;
     chapter_to_process.processing_status = Some("processing".to_string());
     chapter_to_process.processed_slides = None;
     chapter_to_process.total_slides = None;
     chapter_to_process.updated_at = Utc::now();
     let _ = state.db.save_chapter(&chapter_to_process).await;
 
-    // Background execution: SQS + worker Lambda in production, in-process locally.
-    state
+    let job = state
         .bg_tasks
-        .dispatch(Job::GenerateSlides {
-            user_id: current_user.id.clone(),
-            subject_id,
-            chapter_id,
-        })
+        .start_generate_slides(current_user.id.clone(), None, subject_id, chapter_id)
         .await
         .map_err(AppError::InternalServerError)?;
+
+    chapter_to_process.job_id = Some(job.id);
+    let _ = state.db.save_chapter(&chapter_to_process).await;
 
     Ok(Json(GenerativeResponse {
         message: "Slide generation started".to_string(),

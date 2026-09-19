@@ -298,7 +298,7 @@ impl AIService {
             Identify the main chapters or sections.
             Return a list of chapters with their titles, page_start, page_end.
             Do not hallucinate chapters if they are not clear.
-            page_start and page_end must be the real page numbers where each chapter begins and ends; if uncertain, give your best estimate — never return 0.
+            page_start and page_end MUST be 1-based PDF page numbers from the 'PDF p.N' labels in the prompt (not printed folios, unless they are the only numbers given). Never return 0.
             Reply ONLY with a valid JSON strictly matching this schema: { \"chapters\": [ { \"title\": \"string\", \"page_start\": 0, \"page_end\": 0 } ] }".to_string();
 
         let prompt = format!("Table Of Contents:\n{}", toc);

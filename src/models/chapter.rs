@@ -18,6 +18,11 @@ pub struct Chapter {
     /// Total slides the current generation run will produce.
     #[serde(default)]
     pub total_slides: Option<i32>,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    /// S3 key of a compiled interactive chapter package (`…/index.html`), when present.
+    #[serde(default)]
+    pub package_key: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -52,6 +57,10 @@ pub struct ChapterResponse {
     pub processed_slides: Option<i32>,
     #[serde(default)]
     pub total_slides: Option<i32>,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    #[serde(default)]
+    pub package_key: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -68,6 +77,8 @@ impl From<Chapter> for ChapterResponse {
             processing_status: chapter.processing_status,
             processed_slides: chapter.processed_slides,
             total_slides: chapter.total_slides,
+            job_id: chapter.job_id,
+            package_key: chapter.package_key,
             created_at: chapter.created_at,
             updated_at: Some(chapter.updated_at),
         }
